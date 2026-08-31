@@ -4,208 +4,119 @@ import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
 
-st.set_page_config(page_title="Nifty Pattern Research", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Nifty Total Market Research",page_icon="📊",layout="wide")
+CSV="https://www.niftyindices.com/IndexConstituent/ind_niftytotalmarket_list.csv"
+PATS=["Any","Double Top","Double Bottom","Head & Shoulders","Inverse Head & Shoulders","Rectangle","Ascending Triangle","Descending Triangle","Symmetrical Triangle","Reversal Bottom","Reversal Top"]
 
-# Nifty 50 symbols. Yahoo Finance uses .NS for NSE-listed shares.
-NIFTY = {
-    "ADANIENT":"ADANIENT.NS","ADANIPORTS":"ADANIPORTS.NS","APOLLOHOSP":"APOLLOHOSP.NS","ASIANPAINT":"ASIANPAINT.NS","AXISBANK":"AXISBANK.NS","BAJAJ-AUTO":"BAJAJ-AUTO.NS","BAJFINANCE":"BAJFINANCE.NS","BAJAJFINSV":"BAJAJFINSV.NS","BEL":"BEL.NS","BHARTIARTL":"BHARTIARTL.NS","BPCL":"BPCL.NS","BRITANNIA":"BRITANNIA.NS","CIPLA":"CIPLA.NS","COALINDIA":"COALINDIA.NS","DRREDDY":"DRREDDY.NS","EICHERMOT":"EICHERMOT.NS","ETERNAL":"ETERNAL.NS","GRASIM":"GRASIM.NS","HCLTECH":"HCLTECH.NS","HDFCBANK":"HDFCBANK.NS","HDFCLIFE":"HDFCLIFE.NS","HINDALCO":"HINDALCO.NS","HINDUNILVR":"HINDUNILVR.NS","ICICIBANK":"ICICIBANK.NS","INDIGO":"INDIGO.NS","INDUSINDBK":"INDUSINDBK.NS","INFY":"INFY.NS","ITC":"ITC.NS","JIOFIN":"JIOFIN.NS","JSWSTEEL":"JSWSTEEL.NS","KOTAKBANK":"KOTAKBANK.NS","LT":"LT.NS","M&M":"M&M.NS","MARUTI":"MARUTI.NS","NESTLEIND":"NESTLEIND.NS","NTPC":"NTPC.NS","ONGC":"ONGC.NS","POWERGRID":"POWERGRID.NS","RELIANCE":"RELIANCE.NS","SBILIFE":"SBILIFE.NS","SBIN":"SBIN.NS","SHRIRAMFIN":"SHRIRAMFIN.NS","SUNPHARMA":"SUNPHARMA.NS","TATACONSUM":"TATACONSUM.NS","TATAMOTORS":"TATAMOTORS.NS","TATASTEEL":"TATASTEEL.NS","TCS":"TCS.NS","TECHM":"TECHM.NS","TITAN":"TITAN.NS","TRENT":"TRENT.NS","ULTRACEMCO":"ULTRACEMCO.NS","WIPRO":"WIPRO.NS"
-}
-PATTERNS=["Any","Cup & Handle","Head & Shoulders","Inverse Head & Shoulders","Double Top","Double Bottom","Rectangle Breakout","Ascending Triangle","Descending Triangle","Symmetrical Triangle","Reversal Bottom","Reversal Top"]
-
-@st.cache_data(ttl=900, show_spinner=False)
-def prices(ticker, period="5y"):
-    d=yf.Ticker(ticker).history(period=period, auto_adjust=True)
-    if d is None or d.empty: return pd.DataFrame()
-    d=d.rename(columns=str.lower)[["open","high","low","close","volume"]].dropna()
-    d.index=pd.to_datetime(d.index).tz_localize(None)
-    return d
-
-@st.cache_data(ttl=43200, show_spinner=False)
-def fundamentals(ticker):
+@st.cache_data(ttl=21600)
+def members():
     try:
-        i=yf.Ticker(ticker).get_info()
-        return {k:i.get(k) for k in ["marketCap","sector","industry","trailingPE","forwardPE","priceToBook","returnOnEquity","returnOnAssets","debtToEquity","currentRatio","profitMargins","operatingMargins","revenueGrowth","earningsGrowth","freeCashflow","operatingCashflow","dividendYield","fiftyTwoWeekHigh","fiftyTwoWeekLow","heldPercentInsiders"]}
-    except Exception: return {}
+        x=pd.read_csv(CSV); x=x[x.Series.astype(str).str.upper().eq("EQ")].copy();x.Symbol=x.Symbol.astype(str).str.upper().str.strip();x["Ticker"]=x.Symbol+".NS"
+        return x[["Company Name","Industry","Symbol","Ticker"]].drop_duplicates("Symbol")
+    except Exception:
+        s=["RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","LT","ITC"]
+        return pd.DataFrame({"Company Name":s,"Industry":"Unavailable","Symbol":s,"Ticker":[z+".NS" for z in s]})
+@st.cache_data(ttl=900)
+def ohlcv(ticker,period="5y"):
+    x=yf.Ticker(ticker).history(period=period,auto_adjust=True)
+    if x is None or x.empty:return pd.DataFrame()
+    x=x.rename(columns=str.lower)[["open","high","low","close","volume"]].dropna();x.index=pd.to_datetime(x.index).tz_localize(None);return x
+@st.cache_data(ttl=43200)
+def info(ticker):
+    try:
+        d=yf.Ticker(ticker).get_info();ks=["marketCap","sector","industry","trailingPE","forwardPE","priceToBook","returnOnEquity","returnOnAssets","debtToEquity","currentRatio","profitMargins","operatingMargins","revenueGrowth","earningsGrowth","freeCashflow","dividendYield","fiftyTwoWeekHigh","fiftyTwoWeekLow"]
+        return {k:d.get(k) for k in ks}
+    except:return {}
+def tf(x,name):
+    if name=="Daily":return x
+    return x.resample("W-FRI" if name=="Weekly" else "ME").agg(open=("open","first"),high=("high","max"),low=("low","min"),close=("close","last"),volume=("volume","sum")).dropna()
+def piv(a,high=True,n=3):
+    return [i for i in range(n,len(a)-n) if (a[i]>=a[i-n:i+n+1].max() if high else a[i]<=a[i-n:i+n+1].min())]
+def event(n,status,d,level,side,note):
+    c=float(d.close.iloc[-1]);return {"Pattern":n,"Status":status,"Direction":side,"Date":d.index[-1],"Level":float(level),"Current":c,"Return %":(c/level-1)*100,"Volume %":(d.volume.iloc[-1]/max(d.volume.tail(21).iloc[:-1].mean(),1)-1)*100,"Notes":note}
+def signals(d):
+    if len(d)<40:return []
+    h=d.high.to_numpy(float);l=d.low.to_numpy(float);c=d.close.to_numpy(float);ph=piv(h);pl=piv(l,False);o=[]
+    if len(ph)>1:
+        a,b=ph[-2:];neck=l[a:b+1].min()
+        if b-a>7 and abs(h[a]-h[b])/h[a]<.045:o.append(event("Double Top","Confirmed" if c[-1]<neck*.99 else "In progress",d,neck,"Bearish","Two similar peaks; confirmation is below neckline"))
+    if len(pl)>1:
+        a,b=pl[-2:];neck=h[a:b+1].max()
+        if b-a>7 and abs(l[a]-l[b])/max(l[a],1)<.045:o.append(event("Double Bottom","Confirmed" if c[-1]>neck*1.01 else "In progress",d,neck,"Bullish","Two similar troughs; confirmation is above neckline"))
+    if len(ph)>2:
+        a,b,z=ph[-3:];sh=(h[a]+h[z])/2;neck=min(l[a:b+1].min(),l[b:z+1].min())
+        if h[b]>sh*1.04 and abs(h[a]-h[z])/sh<.1:o.append(event("Head & Shoulders","Confirmed" if c[-1]<neck*.99 else "In progress",d,neck,"Bearish","Confirmation is below neckline"))
+    if len(pl)>2:
+        a,b,z=pl[-3:];sh=(l[a]+l[z])/2;neck=max(h[a:b+1].max(),h[b:z+1].max())
+        if l[b]<sh*.96 and abs(l[a]-l[z])/max(sh,1)<.1:o.append(event("Inverse Head & Shoulders","Confirmed" if c[-1]>neck*1.01 else "In progress",d,neck,"Bullish","Confirmation is above neckline"))
+    w=30;hh=h[-w:];ll=l[-w:];hs=np.polyfit(range(w),hh,1)[0]/hh.mean();ls=np.polyfit(range(w),ll,1)[0]/ll.mean();r=hh.max();s=ll.min()
+    if (r-s)/r<.15:
+        name="Rectangle" if abs(hs)<.001 and abs(ls)<.001 else "Ascending Triangle" if abs(hs)<.0007 and ls>.0007 else "Descending Triangle" if hs<-.0007 and abs(ls)<.0007 else "Symmetrical Triangle" if hs<-.0007 and ls>.0007 else None
+        if name:o.append(event(name,"Confirmed" if c[-1]>r*1.01 or c[-1]<s*.99 else "In progress",d,r if c[-1]>=s else s,"Bullish" if c[-1]>r else "Bearish" if c[-1]<s else "Neutral","Breakout requires a close outside the range"))
+    op=d.open.iloc[-1];body=abs(c[-1]-op);rng=max(h[-1]-l[-1],1e-9)
+    if (min(op,c[-1])-l[-1])/rng>.55 and body/rng<.35 and c[-1]<=l[-11:-1].min()*1.04:o.append(event("Reversal Bottom","Candidate",d,l[-1],"Bullish","Hammer-like candle near local low; await confirmation"))
+    if (h[-1]-max(op,c[-1]))/rng>.55 and body/rng<.35 and c[-1]>=h[-11:-1].max()*.96:o.append(event("Reversal Top","Candidate",d,h[-1],"Bearish","Shooting-star-like candle near local high; await confirmation"))
+    return o
+def levels(d):
+    c=d.close.iloc[-1];lo=[d.low.iloc[i] for i in piv(d.low.to_numpy(),False) if d.low.iloc[i]<c];hi=[d.high.iloc[i] for i in piv(d.high.to_numpy()) if d.high.iloc[i]>c]
+    return max(lo[-8:]) if lo else d.low.tail(20).min(),min(hi[-8:]) if hi else d.high.tail(20).max()
+def trend(d):
+    c=d.close.iloc[-1];a=d.close.rolling(20).mean().iloc[-1];b=d.close.rolling(50).mean().iloc[-1];z=d.close.rolling(200).mean().iloc[-1] if len(d)>200 else np.nan
+    return "Strong bullish" if pd.notna(z) and c>a>b>z else "Bullish" if c>a>b else "Bearish" if c<a<b else "Neutral / consolidation"
+def fundscore(f):
+    s=0;notes=[]
+    for k,cut,points,label in [("returnOnEquity",.2,2,"ROE ≥20%"),("profitMargins",.15,2,"Profit margin ≥15%"),("revenueGrowth",.12,1,"Revenue growth ≥12%")]:
+        if isinstance(f.get(k),(int,float)) and f[k]>=cut:s+=points;notes.append(label)
+    if isinstance(f.get("debtToEquity"),(int,float)) and f["debtToEquity"]<50:s+=2;notes.append("Low debt")
+    if isinstance(f.get("freeCashflow"),(int,float)) and f["freeCashflow"]>0:s+=2;notes.append("Positive FCF")
+    return s,"Excellent" if s>=7 else "Good" if s>=5 else "Average" if s>=3 else "Needs review",notes
+def fig(d,ps,title):
+    x=d.tail(260);f=make_subplots(rows=2,cols=1,shared_xaxes=True,row_heights=[.76,.24]);f.add_trace(go.Candlestick(x=x.index,open=x.open,high=x.high,low=x.low,close=x.close,name="Price"),1,1);f.add_trace(go.Scatter(x=x.index,y=x.close.rolling(20).mean(),name="20 MA"),1,1);f.add_trace(go.Scatter(x=x.index,y=x.close.rolling(50).mean(),name="50 MA"),1,1);f.add_trace(go.Bar(x=x.index,y=x.volume,name="Volume"),2,1)
+    for p in ps:f.add_hline(y=p["Level"],line_dash="dot",annotation_text=p["Pattern"],row=1,col=1)
+    f.update_layout(height=600,title=title,xaxis_rangeslider_visible=False,template="plotly_white",legend_orientation="h");return f
 
-def rs(d, rule):
-    return d.resample(rule).agg(open=("open","first"),high=("high","max"),low=("low","min"),close=("close","last"),volume=("volume","sum")).dropna()
-
-def pivots(a, kind, order=3):
-    ans=[]
-    for i in range(order,len(a)-order):
-        w=a[i-order:i+order+1]
-        if (kind=="high" and a[i]>=w.max()) or (kind=="low" and a[i]<=w.min()): ans.append(i)
-    return ans
-
-def base_result(name,status,df,level,direction,notes=""):
-    c=float(df.close.iloc[-1]); vol=float(df.volume.iloc[-1]/max(df.volume.tail(21).iloc[:-1].mean(),1)-1)*100
-    return {"pattern":name,"status":status,"date":df.index[-1],"level":float(level),"current":c,"return":(c/level-1)*100,"direction":direction,"volume":vol,"notes":notes}
-
-def detect(df):
-    if len(df)<35: return []
-    out=[]; h=df.high.to_numpy(float); l=df.low.to_numpy(float); c=df.close.to_numpy(float)
-    # double top/bottom using most recent two meaningful pivots
-    ph=pivots(h,"high"); pl=pivots(l,"low")
-    if len(ph)>=2:
-        a,b=ph[-2],ph[-1]
-        if b-a>=8 and abs(h[a]-h[b])/max(h[a],1)<.045:
-            neck=float(l[a:b+1].min())
-            if c[-1]<neck*.99: out.append(base_result("Double Top","Confirmed",df,neck,"Bearish","Breakdown below intervening support"))
-            elif c[-1]<max(h[a],h[b])*1.01: out.append(base_result("Double Top","In progress",df,neck,"Bearish","Two similar highs; neckline not broken"))
-    if len(pl)>=2:
-        a,b=pl[-2],pl[-1]
-        if b-a>=8 and abs(l[a]-l[b])/max(l[a],1)<.045:
-            neck=float(h[a:b+1].max())
-            if c[-1]>neck*1.01: out.append(base_result("Double Bottom","Confirmed",df,neck,"Bullish","Breakout above intervening resistance"))
-            elif c[-1]>min(l[a],l[b])*.99: out.append(base_result("Double Bottom","In progress",df,neck,"Bullish","Two similar lows; neckline not broken"))
-    # H&S from 3 latest pivot highs, inverse from 3 pivot lows
-    if len(ph)>=3:
-        a,b,z=ph[-3:]; shoulders=(h[a]+h[z])/2; neck=min(l[a:b+1].min(),l[b:z+1].min())
-        if h[b]>shoulders*1.04 and abs(h[a]-h[z])/shoulders<.10:
-            out.append(base_result("Head & Shoulders","Confirmed" if c[-1]<neck*.99 else "In progress",df,neck,"Bearish","Neckline confirmation required"))
-    if len(pl)>=3:
-        a,b,z=pl[-3:]; shoulders=(l[a]+l[z])/2; neck=max(h[a:b+1].max(),h[b:z+1].max())
-        if l[b]<shoulders*.96 and abs(l[a]-l[z])/max(shoulders,1)<.10:
-            out.append(base_result("Inverse Head & Shoulders","Confirmed" if c[-1]>neck*1.01 else "In progress",df,neck,"Bullish","Neckline confirmation required"))
-    # Rectangle and triangles over 30 bars, scaled slopes
-    w=30; x=np.arange(w); hh=h[-w:]; ll=l[-w:]; hs=np.polyfit(x,hh,1)[0]/max(hh.mean(),1); ls=np.polyfit(x,ll,1)[0]/max(ll.mean(),1)
-    resistance=float(hh.max()); support=float(ll.min()); width=(resistance-support)/max(resistance,1)
-    if width<.15:
-        if abs(hs)<.001 and abs(ls)<.001: name="Rectangle Breakout"
-        elif abs(hs)<.0007 and ls>.0007: name="Ascending Triangle"
-        elif hs<-.0007 and abs(ls)<.0007: name="Descending Triangle"
-        elif hs<-.0007 and ls>.0007: name="Symmetrical Triangle"
-        else: name=None
-        if name:
-            if c[-1]>resistance*1.01: out.append(base_result(name,"Confirmed",df,resistance,"Bullish","Close above resistance"))
-            elif c[-1]<support*.99: out.append(base_result(name,"Confirmed",df,support,"Bearish","Close below support"))
-            else: out.append(base_result(name,"In progress",df,resistance if name!="Descending Triangle" else support,"Neutral","Consolidation remains inside boundaries"))
-    # reversal candle and local location
-    o=float(df.open.iloc[-1]); body=abs(c[-1]-o); rng=max(h[-1]-l[-1],1e-9); lower=min(o,c[-1])-l[-1]; upper=h[-1]-max(o,c[-1])
-    prior_low=l[-11:-1].min(); prior_high=h[-11:-1].max()
-    if lower/rng>.55 and body/rng<.35 and c[-1] <= prior_low*1.04: out.append(base_result("Reversal Bottom","Candidate",df,l[-1],"Bullish","Hammer-like candle near 10-bar low"))
-    if upper/rng>.55 and body/rng<.35 and c[-1] >= prior_high*.96: out.append(base_result("Reversal Top","Candidate",df,h[-1],"Bearish","Shooting-star-like candle near 10-bar high"))
-    return out
-
-def levels(df):
-    close=float(df.close.iloc[-1]); p1=pivots(df.low.to_numpy(),"low"); p2=pivots(df.high.to_numpy(),"high")
-    lows=[float(df.low.iloc[i]) for i in p1[-8:] if df.low.iloc[i]<close]; highs=[float(df.high.iloc[i]) for i in p2[-8:] if df.high.iloc[i]>close]
-    return (max(lows) if lows else float(df.low.tail(20).min()), min(highs) if highs else float(df.high.tail(20).max()))
-
-def trend(df):
-    c=float(df.close.iloc[-1]); ma20=df.close.rolling(20).mean().iloc[-1]; ma50=df.close.rolling(50).mean().iloc[-1]; ma200=df.close.rolling(200).mean().iloc[-1] if len(df)>=200 else np.nan
-    if pd.notna(ma200) and c>ma20>ma50>ma200:return "Strong bullish"
-    if c>ma20>ma50:return "Bullish"
-    if c<ma20<ma50:return "Bearish"
-    return "Neutral / consolidating"
-
-def score(f):
-    s=0; notes=[]
-    def num(k): return f.get(k) if isinstance(f.get(k),(int,float)) else None
-    roe=num("returnOnEquity"); debt=num("debtToEquity"); margin=num("profitMargins"); growth=num("revenueGrowth"); fcf=num("freeCashflow")
-    if roe and roe>=.20:s+=2;notes.append("ROE ≥ 20%")
-    elif roe and roe>=.15:s+=1;notes.append("ROE ≥ 15%")
-    if debt is not None and debt<50:s+=2;notes.append("Low debt")
-    elif debt is not None and debt<100:s+=1
-    if margin and margin>=.15:s+=2;notes.append("Healthy profit margin")
-    elif margin and margin>=.08:s+=1
-    if growth and growth>=.12:s+=1;notes.append("Revenue growth")
-    if fcf and fcf>0:s+=2;notes.append("Positive free cash flow")
-    label="Excellent" if s>=7 else "Good" if s>=5 else "Average" if s>=3 else "Needs review"
-    return s,label,notes
-
-def chart(df, title, pats):
-    d=df.tail(260).copy(); fig=make_subplots(rows=2,cols=1,shared_xaxes=True,row_heights=[.76,.24],vertical_spacing=.03)
-    fig.add_trace(go.Candlestick(x=d.index,open=d.open,high=d.high,low=d.low,close=d.close,name="Price"),1,1)
-    fig.add_trace(go.Scatter(x=d.index,y=d.close.rolling(20).mean(),name="20 MA",line=dict(color="#1976d2")),1,1)
-    fig.add_trace(go.Scatter(x=d.index,y=d.close.rolling(50).mean(),name="50 MA",line=dict(color="#ff9800")),1,1)
-    fig.add_trace(go.Bar(x=d.index,y=d.volume,name="Volume",marker_color="#90a4ae"),2,1)
-    for p in pats:
-        fig.add_hline(y=p["level"],line_dash="dot",line_color="#8e24aa",annotation_text=p["pattern"],row=1,col=1)
-    fig.update_layout(title=title,height=620,xaxis_rangeslider_visible=False,template="plotly_white",legend_orientation="h")
-    return fig
-
-def backtest(df, pattern):
-    # Walk forward: use detector only on data available at each point; report last five confirmed events.
-    events=[]; step=1
-    for end in range(80,len(df)-21,step):
-        found=[p for p in detect(df.iloc[:end]) if p["pattern"]==pattern and p["status"]=="Confirmed"]
-        if found:
-            p=found[-1]; day=df.index[end-1]
-            if not events or events[-1]["date"]!=day:
-                future=float(df.close.iloc[min(end+20,len(df)-1)]); ret=(future/p["current"]-1)*100
-                signed=ret if p["direction"]=="Bullish" else -ret
-                events.append({"date":day.date(),"breakout":p["current"],"20-bar return":signed,"success":signed>0})
-    events=events[-5:]
-    if not events:return None
-    r=[e["20-bar return"] for e in events]
-    return events,{"Occurrences":len(events),"Win rate":f"{100*np.mean([e['success'] for e in events]):.0f}%","Median return":f"{np.median(r):+.2f}%","Average return":f"{np.mean(r):+.2f}%"}
-
-def fmt(v,pct=False):
-    if v is None or not isinstance(v,(int,float)) or np.isnan(v):return "—"
-    return f"{v*100:.1f}%" if pct else f"{v:.2f}"
-
-st.title("📊 Nifty Stock Research Dashboard")
-st.caption("Latest available Yahoo Finance data • Pattern signals are rule-based research aids, not investment advice.")
+st.title("📊 Nifty Total Market (750) Research Dashboard")
+st.caption("Uses the current Nifty Total Market constituent list and latest available Yahoo Finance data. Educational research only; not investment advice.")
 with st.sidebar:
-    mode=st.radio("Research mode",["Stock research", "Pattern scanner"])
-    mincap=st.number_input("Minimum market cap (₹ crore)",value=3000,min_value=0,step=1000)
-    if st.button("Refresh cached data"):
-        st.cache_data.clear(); st.rerun()
-    st.caption("Prices cache for 15 minutes; fundamentals cache for 12 hours.")
-
+    mode=st.radio("Mode",["Stock research","Pattern scanner"]);minimum=st.number_input("Minimum market cap (₹ crore)",0,value=3000,step=1000)
+    st.caption(f"Current index universe: {len(members())} EQ constituents")
+    if st.button("Refresh all cached data"):st.cache_data.clear();st.rerun()
+u=members()
 if mode=="Stock research":
-    symbol=st.selectbox("Search Nifty stock",sorted(NIFTY),index=sorted(NIFTY).index("RELIANCE"))
-    with st.spinner("Downloading latest market data..."):
-        d=prices(NIFTY[symbol]); f=fundamentals(NIFTY[symbol])
-    if d.empty: st.error("No price data returned. Please try Refresh cached data."); st.stop()
-    cap=(f.get("marketCap") or 0)/1e7
-    if cap and cap<mincap: st.warning(f"{symbol} is below your ₹{mincap:,.0f} crore filter.")
-    support,resistance=levels(d); s,label,notes=score(f)
-    a,b,c,dcol=st.columns(4); a.metric("Last close",f"₹{d.close.iloc[-1]:,.2f}"); b.metric("Market cap",f"₹{cap:,.0f} Cr" if cap else "—"); c.metric("Daily trend",trend(prices(NIFTY[symbol],"2y"))); dcol.metric("Fundamental score",f"{s}/9 · {label}")
-    tabs=st.tabs(["Daily", "Weekly", "Monthly", "Fundamentals", "Historical evidence"])
-    raw=prices(NIFTY[symbol],"5y")
-    for tab,name,frame in zip(tabs,["Daily","Weekly","Monthly"],[raw,rs(raw,"W-FRI"),rs(raw,"ME")]):
+    syms=sorted(u.Symbol.tolist());sym=st.selectbox("Search a Nifty Total Market stock",syms,index=syms.index("RELIANCE") if "RELIANCE" in syms else 0);rec=u[u.Symbol.eq(sym)].iloc[0];d=ohlcv(rec.Ticker);f=info(rec.Ticker)
+    if d.empty:st.error("No data returned. Refresh and try again.");st.stop()
+    cap=(f.get("marketCap") or 0)/1e7;sc,lab,notes=fundscore(f);a,b,c,e=st.columns(4);a.metric("Last close",f"₹{d.close.iloc[-1]:,.2f}");b.metric("Market cap",f"₹{cap:,.0f} Cr" if cap else "Unavailable");c.metric("Trend",trend(d));e.metric("Fundamentals",f"{sc}/9 · {lab}")
+    st.caption(f"{rec['Company Name']} • {rec.Industry}")
+    tabs=st.tabs(["Daily","Weekly","Monthly","Fundamentals"])
+    for tab,name in zip(tabs[:3],["Daily","Weekly","Monthly"]):
         with tab:
-            pp=detect(frame); st.subheader(name+" technical research")
-            if pp:
-                table=pd.DataFrame(pp)[["pattern","status","direction","date","level","current","return","volume","notes"]].rename(columns={"level":"Breakout / neckline","current":"Current price","return":"Return since level (%)","volume":"Volume vs 20 avg (%)"})
-                st.dataframe(table,hide_index=True,use_container_width=True,column_config={"date":st.column_config.DatetimeColumn(format="YYYY-MM-DD"),"Breakout / neckline":st.column_config.NumberColumn(format="₹%.2f"),"Current price":st.column_config.NumberColumn(format="₹%.2f"),"Return since level (%)":st.column_config.NumberColumn(format="%.2f%%"),"Volume vs 20 avg (%)":st.column_config.NumberColumn(format="%.1f%%")})
-            else: st.info("No supported confirmed/in-progress pattern currently detected on this timeframe.")
-            x,y=levels(frame); q1,q2,q3=st.columns(3);q1.metric("Trend",trend(frame));q2.metric("Nearest support",f"₹{x:,.2f}");q3.metric("Nearest resistance",f"₹{y:,.2f}")
-            st.plotly_chart(chart(frame,f"{symbol} — {name}",pp),use_container_width=True)
+            q=tf(d,name);ps=signals(q);sup,res=levels(q);x,y,z=st.columns(3);x.metric("Trend",trend(q));y.metric("Support",f"₹{sup:,.2f}");z.metric("Resistance",f"₹{res:,.2f}")
+            if ps:st.dataframe(pd.DataFrame(ps),hide_index=True,use_container_width=True,column_config={"Date":st.column_config.DatetimeColumn(format="YYYY-MM-DD"),"Level":st.column_config.NumberColumn(format="₹%.2f"),"Current":st.column_config.NumberColumn(format="₹%.2f"),"Return %":st.column_config.NumberColumn(format="%.2f%%"),"Volume %":st.column_config.NumberColumn(format="%.1f%%")})
+            else:st.info("No supported active pattern found.")
+            st.plotly_chart(fig(q,ps,f"{sym} — {name}"),use_container_width=True)
     with tabs[3]:
-        st.subheader(f"Fundamental health: {label} ({s}/9)")
-        st.write("Signals: "+(", ".join(notes) if notes else "insufficient comparable fields"))
-        rows={"Sector":f.get("sector"),"Industry":f.get("industry"),"P/E":fmt(f.get("trailingPE")),"Forward P/E":fmt(f.get("forwardPE")),"Price/Book":fmt(f.get("priceToBook")),"ROE":fmt(f.get("returnOnEquity"),True),"ROA":fmt(f.get("returnOnAssets"),True),"Profit margin":fmt(f.get("profitMargins"),True),"Operating margin":fmt(f.get("operatingMargins"),True),"Revenue growth":fmt(f.get("revenueGrowth"),True),"Earnings growth":fmt(f.get("earningsGrowth"),True),"Debt/Equity":fmt(f.get("debtToEquity")),"Current ratio":fmt(f.get("currentRatio")),"Free cash flow":f"₹{(f.get('freeCashflow') or 0)/1e7:,.0f} Cr" if f.get("freeCashflow") else "—","Dividend yield":fmt(f.get("dividendYield"),True)}
-        st.dataframe(pd.DataFrame(rows.items(),columns=["Metric","Value"]),hide_index=True,use_container_width=True)
-        st.info("For banks/NBFCs, debt/equity and free-cash-flow comparisons are less meaningful. Add asset quality, CASA, NIM and capital-adequacy data from a dedicated Indian fundamentals provider before making banking decisions.")
-    with tabs[4]:
-        choices=sorted(set(p["pattern"] for p in detect(raw))) or PATTERNS[1:]
-        pat=st.selectbox("Pattern to backtest",choices)
-        if st.button("Run historical test (may take a few seconds)"):
-            with st.spinner("Walking through historical price data..."):
-                ans=backtest(raw,pat)
-            if ans:
-                ev,stats=ans; st.dataframe(pd.DataFrame(ev),hide_index=True,use_container_width=True); st.json(stats)
-            else: st.info("No confirmed instances under these strict rules with enough forward data.")
+        st.subheader(f"Fundamental health: {lab} ({sc}/9)");st.write("Signals: "+(", ".join(notes) if notes else "insufficient fields"))
+        def val(k,pc=False):
+            v=f.get(k);return "—" if not isinstance(v,(int,float)) else f"{v*100:.1f}%" if pc else f"{v:.2f}"
+        data={"Sector":f.get("sector"),"Industry":f.get("industry"),"P/E":val("trailingPE"),"Forward P/E":val("forwardPE"),"P/B":val("priceToBook"),"ROE":val("returnOnEquity",True),"ROA":val("returnOnAssets",True),"Profit margin":val("profitMargins",True),"Operating margin":val("operatingMargins",True),"Revenue growth":val("revenueGrowth",True),"Earnings growth":val("earningsGrowth",True),"Debt/Equity":val("debtToEquity"),"Current ratio":val("currentRatio"),"FCF":f"₹{f.get('freeCashflow',0)/1e7:,.0f} Cr" if f.get("freeCashflow") else "—","Dividend yield":val("dividendYield",True)}
+        st.dataframe(pd.DataFrame(data.items(),columns=["Metric","Value"]),hide_index=True,use_container_width=True)
+        st.info("For banks/NBFCs, use CASA, NIM, GNPA/NNPA, provision coverage and capital adequacy alongside these metrics.")
 else:
-    pattern=st.selectbox("Pattern",PATTERNS); timeframe=st.selectbox("Timeframe",["Daily","Weekly","Monthly"]); status=st.selectbox("Status",["Any","Confirmed","In progress","Candidate"])
-    if st.button("Scan Nifty universe",type="primary"):
-        rows=[]; bar=st.progress(0)
-        for n,(sym,tic) in enumerate(NIFTY.items(),1):
+    pat=st.selectbox("Pattern",PATS);time=st.selectbox("Timeframe",["Daily","Weekly","Monthly"]);stat=st.selectbox("Status",["Any","Confirmed","In progress","Candidate"])
+    st.warning("A first 750-stock scan can take several minutes on free hosting. Results cache for 15 minutes. For dependable scheduled daily scans/alerts, use a database plus scheduled worker.")
+    if st.button("Scan current Nifty 750",type="primary"):
+        rows=[];bar=st.progress(0)
+        for i,r in u.reset_index(drop=True).iterrows():
             try:
-                f=fundamentals(tic); cap=(f.get("marketCap") or 0)/1e7
-                if cap and cap<mincap: continue
-                d=prices(tic,"5y"); frame=d if timeframe=="Daily" else rs(d,"W-FRI" if timeframe=="Weekly" else "ME")
-                for p in detect(frame):
-                    if (pattern=="Any" or p["pattern"]==pattern) and (status=="Any" or p["status"]==status): rows.append({"Stock":sym,"Market cap (Cr)":round(cap),"Pattern":p["pattern"],"Status":p["status"],"Direction":p["direction"],"Date":p["date"].date(),"Level":round(p["level"],2),"Current":round(p["current"],2),"Return %":round(p["return"],2),"Notes":p["notes"]})
-            except Exception: pass
-            bar.progress(n/len(NIFTY))
-        bar.empty(); st.subheader(f"Matches: {len(rows)}")
-        if rows: st.dataframe(pd.DataFrame(rows).sort_values(["Status","Return %"],ascending=[True,False]),hide_index=True,use_container_width=True)
-        else: st.info("No matching current signals. Try a different timeframe, status, or pattern.")
-
-st.divider(); st.caption("Data provided by Yahoo Finance. Verify prices, corporate actions, fundamentals and patterns independently. This application is for education/research only and is not investment advice.")
+                d=tf(ohlcv(r.Ticker),time);m=[p for p in signals(d) if (pat=="Any" or p["Pattern"]==pat) and (stat=="Any" or p["Status"]==stat)]
+                if m:
+                    cap=(info(r.Ticker).get("marketCap") or 0)/1e7
+                    if cap>=minimum:
+                        for p in m:rows.append({"Stock":r.Symbol,"Company":r["Company Name"],"Industry":r.Industry,"Market cap Cr":round(cap),**p})
+            except:pass
+            bar.progress((i+1)/len(u))
+        bar.empty();st.subheader(f"Matches: {len(rows)}")
+        if rows:st.dataframe(pd.DataFrame(rows).sort_values(["Status","Return %"],ascending=[True,False]),hide_index=True,use_container_width=True)
+        else:st.info("No matches. Try another pattern, timeframe, or status.")
+st.divider();st.caption("Constituents: Nifty Indices. Prices/fundamentals: Yahoo Finance. Verify data, corporate actions and all signals independently.")

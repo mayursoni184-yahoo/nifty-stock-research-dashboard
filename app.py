@@ -1316,30 +1316,64 @@ if mode == "Stock research":
 else:
     st.subheader("Nifty Total Market pattern scanner")
 
-    selected_pattern = st.selectbox(
-        "Pattern",
-        PATTERN_OPTIONS,
+    st.caption(
+        "Scan stocks by technical pattern, timeframe, overall trend, "
+        "pattern status, and minimum market capitalization."
     )
 
-    selected_timeframe = st.selectbox(
-        "Timeframe",
-        TIMEFRAMES,
-    )
+    filter_col1, filter_col2 = st.columns(2)
 
-    selected_status = st.selectbox(
-        "Status",
-        [
-            "Any",
-            "Confirmed",
-            "In progress",
-            "Candidate",
-        ],
+    with filter_col1:
+        selected_pattern = st.selectbox(
+            "Pattern",
+            PATTERN_OPTIONS,
+        )
+
+        selected_timeframe = st.selectbox(
+            "Timeframe",
+            [
+                "Any",
+                "Daily",
+                "Weekly",
+                "Monthly",
+            ],
+        )
+
+    with filter_col2:
+        selected_overall_trend = st.selectbox(
+            "Overall trend",
+            [
+                "Any",
+                "Strong bullish",
+                "Bullish",
+                "Neutral / consolidating",
+                "Bearish",
+                "Insufficient data",
+            ],
+        )
+
+        selected_status = st.selectbox(
+            "Pattern status",
+            [
+                "Any",
+                "Confirmed",
+                "In progress",
+                "Candidate",
+            ],
+        )
+
+    st.info(
+        "How the filters work: when Timeframe is set to Any, the scanner "
+        "checks Daily, Weekly, and Monthly charts. A stock is returned for "
+        "every timeframe where it matches your selected pattern, trend, "
+        "status, and market-cap criteria."
     )
 
     st.warning(
-        "A first full 750-stock scan can take several minutes on free "
-        "Streamlit hosting. Price data is cached for 15 minutes, so later "
-        "scans should be faster."
+        "A first full Nifty Total Market scan can take several minutes on "
+        "free Streamlit hosting. Selecting Any timeframe requires three "
+        "technical scans per stock: Daily, Weekly, and Monthly. "
+        "Price data is cached for 15 minutes."
     )
 
     if st.button(
@@ -1348,8 +1382,20 @@ else:
     ):
         rows = []
 
+        # "Any" means scan all available chart timeframes.
+        if selected_timeframe == "Any":
+            timeframes_to_scan = [
+                "Daily",
+                "Weekly",
+                "Monthly",
+            ]
+        else:
+            timeframes_to_scan = [
+                selected_timeframe
+            ]
+
         progress = st.progress(0)
-        status_text = st.empty()
+        progress_status = st.empty()
 
         total_stocks = len(universe)
 
@@ -1357,11 +1403,14 @@ else:
             symbol = record["Symbol"]
             ticker = record["Ticker"]
 
-            status_text.caption(
-                f"Scanning {index + 1:,} of {total_stocks:,}: {symbol}"
+            progress_status.caption(
+                f"Scanning {index + 1:,} of {total_stocks:,}: "
+                f"{symbol}"
             )
 
             try:
+                # Download once per stock, then resample the same data into
+                # Daily / Weekly / Monthly chart structures.
                 stock_data = fetch_price_data(
                     ticker,
                     "5y",
@@ -1370,32 +1419,60 @@ else:
                 if stock_data.empty:
                     continue
 
-                timeframe_data = resample_prices(
-                    stock_data,
-                    selected_timeframe,
-                )
+                stock_matches = []
 
-                stock_signals = detect_patterns(
-                    timeframe_data
-                )
-
-                matching_signals = []
-
-                for signal in stock_signals:
-                    pattern_match = (
-                        selected_pattern == "Any"
-                        or signal["Pattern"] == selected_pattern
+                for timeframe in timeframes_to_scan:
+                    timeframe_data = resample_prices(
+                        stock_data,
+                        timeframe,
                     )
 
-                    status_match = (
-                        selected_status == "Any"
-                        or signal["Status"] == selected_status
+                    if timeframe_data.empty:
+                        continue
+
+                    # Trend is calculated separately for each selected chart.
+                    # Example: a stock can be Strong bullish on Daily but
+                    # Neutral / consolidating on Monthly.
+                    overall_trend = calculate_trend(
+                        timeframe_data
                     )
 
-                    if pattern_match and status_match:
-                        matching_signals.append(signal)
+                    # Apply the trend filter before processing pattern rows.
+                    trend_matches = (
+                        selected_overall_trend == "Any"
+                        or overall_trend == selected_overall_trend
+                    )
 
-                if matching_signals:
+                    if not trend_matches:
+                        continue
+
+                    detected_signals = detect_patterns(
+                        timeframe_data
+                    )
+
+                    for signal in detected_signals:
+                        pattern_matches = (
+                            selected_pattern == "Any"
+                            or signal["Pattern"] == selected_pattern
+                        )
+
+                        status_matches = (
+                            selected_status == "Any"
+                            or signal["Status"] == selected_status
+                        )
+
+                        if pattern_matches and status_matches:
+                            stock_matches.append(
+                                {
+                                    "Timeframe": timeframe,
+                                    "Overall Trend": overall_trend,
+                                    **signal,
+                                }
+                            )
+
+                # Do not fetch fundamentals/market cap unless the stock has
+                # already passed the technical-pattern and trend filters.
+                if stock_matches:
                     stock_fundamentals = fetch_fundamentals(
                         ticker
                     )
@@ -1404,12 +1481,12 @@ else:
                         stock_fundamentals.get("marketCap") or 0
                     ) / 10000000
 
-                    # Strict filter: exclude stocks if market-cap data is missing
-                    # or if it is below the selected threshold.
+                    # Strict market-cap rule:
+                    # A missing market-cap value is treated as not eligible.
                     if market_cap_crore < minimum_market_cap:
                         continue
 
-                    for signal in matching_signals:
+                    for signal in stock_matches:
                         rows.append(
                             {
                                 "Stock": symbol,
@@ -1424,6 +1501,8 @@ else:
                         )
 
             except Exception:
+                # A single unavailable Yahoo Finance symbol should not
+                # terminate the complete Nifty Total Market scan.
                 pass
 
             progress.progress(
@@ -1434,7 +1513,7 @@ else:
             )
 
         progress.empty()
-        status_text.empty()
+        progress_status.empty()
 
         st.subheader(
             f"Matching signals: {len(rows)}"
@@ -1443,15 +1522,72 @@ else:
         if rows:
             results = pd.DataFrame(rows)
 
+            # Sort confirmed signals first, followed by strongest return.
+            status_priority = {
+                "Confirmed": 1,
+                "In progress": 2,
+                "Candidate": 3,
+            }
+
+            results["Status Priority"] = (
+                results["Status"]
+                .map(status_priority)
+                .fillna(99)
+            )
+
             results = results.sort_values(
                 by=[
-                    "Status",
+                    "Status Priority",
+                    "Overall Trend",
                     "Return %",
                 ],
                 ascending=[
                     True,
+                    True,
                     False,
                 ],
+            )
+
+            results = results.drop(
+                columns=["Status Priority"]
+            )
+
+            summary_col1, summary_col2, summary_col3, summary_col4 = (
+                st.columns(4)
+            )
+
+            summary_col1.metric(
+                "Total matches",
+                len(results),
+            )
+
+            summary_col2.metric(
+                "Confirmed",
+                int(
+                    (
+                        results["Status"] == "Confirmed"
+                    ).sum()
+                ),
+            )
+
+            summary_col3.metric(
+                "Strong bullish",
+                int(
+                    (
+                        results["Overall Trend"]
+                        == "Strong bullish"
+                    ).sum()
+                ),
+            )
+
+            summary_col4.metric(
+                "Bullish direction",
+                int(
+                    (
+                        results["Direction"]
+                        == "Bullish"
+                    ).sum()
+                ),
             )
 
             st.dataframe(
@@ -1460,7 +1596,7 @@ else:
                 use_container_width=True,
                 column_config={
                     "Date": st.column_config.DatetimeColumn(
-                        "Date",
+                        "Signal date",
                         format="YYYY-MM-DD",
                     ),
                     "Level": st.column_config.NumberColumn(
@@ -1479,6 +1615,10 @@ else:
                         "Volume vs average",
                         format="%.1f%%",
                     ),
+                    "Market Cap (Cr)": st.column_config.NumberColumn(
+                        "Market cap",
+                        format="₹%d Cr",
+                    ),
                 },
             )
 
@@ -1495,10 +1635,10 @@ else:
 
         else:
             st.info(
-                "No stocks matched the selected pattern, timeframe, status, "
-                "and market-cap filters."
+                "No stocks matched your selected Pattern, Timeframe, "
+                "Overall Trend, Pattern Status, and Market Cap filters. "
+                "Try setting one or more filters to Any."
             )
-
 
 # =============================================================================
 # FOOTER

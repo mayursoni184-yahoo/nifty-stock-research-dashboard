@@ -893,6 +893,728 @@ def format_number(value, percentage=False):
 
     return f"{value:.2f}"
 
+# =============================================================================
+# ADVANCED FUNDAMENTAL MOMENTUM ENGINE
+# =============================================================================
+
+def safe_number(value, default=None):
+    """Safely convert a value to float."""
+    try:
+        if value is None:
+            return default
+
+        if pd.isna(value):
+            return default
+
+        return float(value)
+
+    except Exception:
+        return default
+
+
+def percentage_change(current_value, previous_value):
+    """
+    Calculates percentage change safely.
+
+    Example:
+    current = 120
+    previous = 100
+    result = 20.0
+    """
+
+    current_value = safe_number(current_value)
+    previous_value = safe_number(previous_value)
+
+    if current_value is None or previous_value is None:
+        return None
+
+    if previous_value == 0:
+        return None
+
+    return (
+        (current_value - previous_value)
+        / abs(previous_value)
+    ) * 100
+
+
+def classify_growth(growth_rate):
+    """Classifies a growth rate."""
+
+    growth_rate = safe_number(growth_rate)
+
+    if growth_rate is None:
+        return "Unavailable"
+
+    if growth_rate >= 20:
+        return "Strong"
+
+    if growth_rate >= 10:
+        return "Healthy"
+
+    if growth_rate >= 3:
+        return "Moderate"
+
+    if growth_rate >= -3:
+        return "Flat"
+
+    if growth_rate >= -10:
+        return "Weak"
+
+    return "Declining"
+
+
+def classify_margin_change(change_in_bps):
+    """
+    Classifies a margin movement in basis points.
+
+    100 basis points = 1 percentage point.
+    """
+
+    change_in_bps = safe_number(change_in_bps)
+
+    if change_in_bps is None:
+        return "Unavailable"
+
+    if change_in_bps >= 150:
+        return "Strong expansion"
+
+    if change_in_bps >= 50:
+        return "Expansion"
+
+    if change_in_bps > -50:
+        return "Stable"
+
+    if change_in_bps > -150:
+        return "Compression"
+
+    return "Sharp compression"
+
+
+def calculate_cagr(start_value, end_value, years):
+    """Calculates CAGR safely."""
+
+    start_value = safe_number(start_value)
+    end_value = safe_number(end_value)
+    years = safe_number(years)
+
+    if (
+        start_value is None
+        or end_value is None
+        or years is None
+        or start_value <= 0
+        or end_value <= 0
+        or years <= 0
+    ):
+        return None
+
+    return (
+        (end_value / start_value) ** (1 / years) - 1
+    ) * 100
+
+
+def assess_annual_fundamentals(annual_data):
+    """
+    Scores annual fundamentals.
+
+    Expected annual_data example:
+
+    {
+        "revenue_cagr_3y": 14.5,
+        "profit_cagr_3y": 18.2,
+        "eps_cagr_3y": 17.5,
+        "roe": 21.0,
+        "roce": 24.0,
+        "operating_margin": 18.0,
+        "margin_trend_bps": 120,
+        "debt_to_equity": 0.25,
+        "interest_coverage": 8.5,
+        "free_cash_flow_positive": True,
+        "cash_flow_conversion": 92.0
+    }
+    """
+
+    score = 0
+    positives = []
+    concerns = []
+
+    revenue_cagr = safe_number(
+        annual_data.get("revenue_cagr_3y")
+    )
+
+    profit_cagr = safe_number(
+        annual_data.get("profit_cagr_3y")
+    )
+
+    eps_cagr = safe_number(
+        annual_data.get("eps_cagr_3y")
+    )
+
+    roe = safe_number(
+        annual_data.get("roe")
+    )
+
+    roce = safe_number(
+        annual_data.get("roce")
+    )
+
+    operating_margin = safe_number(
+        annual_data.get("operating_margin")
+    )
+
+    margin_trend_bps = safe_number(
+        annual_data.get("margin_trend_bps")
+    )
+
+    debt_to_equity = safe_number(
+        annual_data.get("debt_to_equity")
+    )
+
+    interest_coverage = safe_number(
+        annual_data.get("interest_coverage")
+    )
+
+    free_cash_flow_positive = annual_data.get(
+        "free_cash_flow_positive"
+    )
+
+    cash_flow_conversion = safe_number(
+        annual_data.get("cash_flow_conversion")
+    )
+
+    # Revenue CAGR score
+    if revenue_cagr is not None:
+        if revenue_cagr >= 15:
+            score += 2
+            positives.append(
+                f"Strong 3-year revenue CAGR: {revenue_cagr:.1f}%"
+            )
+
+        elif revenue_cagr >= 8:
+            score += 1
+            positives.append(
+                f"Healthy 3-year revenue CAGR: {revenue_cagr:.1f}%"
+            )
+
+        elif revenue_cagr < 0:
+            concerns.append(
+                f"Negative 3-year revenue CAGR: {revenue_cagr:.1f}%"
+            )
+
+    # Profit CAGR score
+    if profit_cagr is not None:
+        if profit_cagr >= 15:
+            score += 2
+            positives.append(
+                f"Strong 3-year profit CAGR: {profit_cagr:.1f}%"
+            )
+
+        elif profit_cagr >= 8:
+            score += 1
+            positives.append(
+                f"Healthy 3-year profit CAGR: {profit_cagr:.1f}%"
+            )
+
+        elif profit_cagr < 0:
+            concerns.append(
+                f"Negative 3-year profit CAGR: {profit_cagr:.1f}%"
+            )
+
+    # EPS CAGR score
+    if eps_cagr is not None:
+        if eps_cagr >= 15:
+            score += 1
+            positives.append(
+                f"Strong 3-year EPS CAGR: {eps_cagr:.1f}%"
+            )
+
+        elif eps_cagr < 0:
+            concerns.append(
+                f"Negative 3-year EPS CAGR: {eps_cagr:.1f}%"
+            )
+
+    # ROE score
+    if roe is not None:
+        if roe >= 20:
+            score += 2
+            positives.append(
+                f"Excellent ROE: {roe:.1f}%"
+            )
+
+        elif roe >= 15:
+            score += 1
+            positives.append(
+                f"Good ROE: {roe:.1f}%"
+            )
+
+        elif roe < 10:
+            concerns.append(
+                f"Low ROE: {roe:.1f}%"
+            )
+
+    # ROCE score
+    if roce is not None:
+        if roce >= 20:
+            score += 2
+            positives.append(
+                f"Excellent ROCE: {roce:.1f}%"
+            )
+
+        elif roce >= 15:
+            score += 1
+            positives.append(
+                f"Good ROCE: {roce:.1f}%"
+            )
+
+        elif roce < 10:
+            concerns.append(
+                f"Low ROCE: {roce:.1f}%"
+            )
+
+    # Margin quality
+    if operating_margin is not None:
+        if operating_margin >= 15:
+            score += 1
+            positives.append(
+                f"Healthy operating margin: {operating_margin:.1f}%"
+            )
+
+        elif operating_margin < 5:
+            concerns.append(
+                f"Low operating margin: {operating_margin:.1f}%"
+            )
+
+    # Margin trend
+    if margin_trend_bps is not None:
+        if margin_trend_bps >= 100:
+            score += 1
+            positives.append(
+                f"Annual margin expansion: {margin_trend_bps:.0f} bps"
+            )
+
+        elif margin_trend_bps <= -100:
+            concerns.append(
+                f"Annual margin contraction: {margin_trend_bps:.0f} bps"
+            )
+
+    # Debt and interest coverage
+    if debt_to_equity is not None:
+        if debt_to_equity <= 0.5:
+            score += 1
+            positives.append(
+                f"Low debt/equity: {debt_to_equity:.2f}"
+            )
+
+        elif debt_to_equity >= 2:
+            concerns.append(
+                f"High debt/equity: {debt_to_equity:.2f}"
+            )
+
+    if interest_coverage is not None:
+        if interest_coverage >= 5:
+            score += 1
+            positives.append(
+                f"Healthy interest coverage: {interest_coverage:.1f}x"
+            )
+
+        elif interest_coverage < 2:
+            concerns.append(
+                f"Weak interest coverage: {interest_coverage:.1f}x"
+            )
+
+    # Cash flow
+    if free_cash_flow_positive is True:
+        score += 1
+        positives.append(
+            "Positive free cash flow"
+        )
+
+    elif free_cash_flow_positive is False:
+        concerns.append(
+            "Negative free cash flow"
+        )
+
+    if cash_flow_conversion is not None:
+        if cash_flow_conversion >= 80:
+            score += 1
+            positives.append(
+                f"Good cash conversion: {cash_flow_conversion:.1f}%"
+            )
+
+        elif cash_flow_conversion < 50:
+            concerns.append(
+                f"Weak cash conversion: {cash_flow_conversion:.1f}%"
+            )
+
+    # Final annual classification
+    if score >= 11:
+        rating = "Strong"
+
+    elif score >= 8:
+        rating = "Strong / Improving"
+
+    elif score >= 5:
+        rating = "Stable"
+
+    elif score >= 3:
+        rating = "Mixed"
+
+    else:
+        rating = "Weak"
+
+    return {
+        "score": score,
+        "rating": rating,
+        "positives": positives,
+        "concerns": concerns,
+    }
+
+
+def assess_quarterly_fundamentals(quarterly_data):
+    """
+    Scores quarterly growth and operating momentum.
+
+    Expected quarterly_data example:
+
+    {
+        "revenue_yoy": 16.0,
+        "profit_yoy": 22.0,
+        "eps_yoy": 21.0,
+        "ebitda_yoy": 18.0,
+        "margin_change_bps_yoy": 120,
+        "revenue_qoq": 4.0,
+        "profit_qoq": 8.0,
+        "operating_kpi_trend": "Improving",
+        "management_guidance": "Positive"
+    }
+    """
+
+    score = 0
+    positives = []
+    concerns = []
+
+    revenue_yoy = safe_number(
+        quarterly_data.get("revenue_yoy")
+    )
+
+    profit_yoy = safe_number(
+        quarterly_data.get("profit_yoy")
+    )
+
+    eps_yoy = safe_number(
+        quarterly_data.get("eps_yoy")
+    )
+
+    ebitda_yoy = safe_number(
+        quarterly_data.get("ebitda_yoy")
+    )
+
+    margin_change_bps_yoy = safe_number(
+        quarterly_data.get("margin_change_bps_yoy")
+    )
+
+    revenue_qoq = safe_number(
+        quarterly_data.get("revenue_qoq")
+    )
+
+    profit_qoq = safe_number(
+        quarterly_data.get("profit_qoq")
+    )
+
+    operating_kpi_trend = quarterly_data.get(
+        "operating_kpi_trend"
+    )
+
+    management_guidance = quarterly_data.get(
+        "management_guidance"
+    )
+
+    # Revenue momentum
+    if revenue_yoy is not None:
+        if revenue_yoy >= 15:
+            score += 2
+            positives.append(
+                f"Strong revenue growth: {revenue_yoy:.1f}% YoY"
+            )
+
+        elif revenue_yoy >= 8:
+            score += 1
+            positives.append(
+                f"Healthy revenue growth: {revenue_yoy:.1f}% YoY"
+            )
+
+        elif revenue_yoy < 0:
+            concerns.append(
+                f"Revenue decline: {revenue_yoy:.1f}% YoY"
+            )
+
+    # Profit momentum
+    if profit_yoy is not None:
+        if profit_yoy >= 20:
+            score += 2
+            positives.append(
+                f"Strong profit growth: {profit_yoy:.1f}% YoY"
+            )
+
+        elif profit_yoy >= 10:
+            score += 1
+            positives.append(
+                f"Healthy profit growth: {profit_yoy:.1f}% YoY"
+            )
+
+        elif profit_yoy < 0:
+            concerns.append(
+                f"Profit decline: {profit_yoy:.1f}% YoY"
+            )
+
+    # EPS momentum
+    if eps_yoy is not None:
+        if eps_yoy >= 15:
+            score += 1
+            positives.append(
+                f"Strong EPS growth: {eps_yoy:.1f}% YoY"
+            )
+
+        elif eps_yoy < 0:
+            concerns.append(
+                f"EPS decline: {eps_yoy:.1f}% YoY"
+            )
+
+    # EBITDA momentum
+    if ebitda_yoy is not None:
+        if ebitda_yoy >= 15:
+            score += 1
+            positives.append(
+                f"Strong EBITDA growth: {ebitda_yoy:.1f}% YoY"
+            )
+
+        elif ebitda_yoy < 0:
+            concerns.append(
+                f"EBITDA decline: {ebitda_yoy:.1f}% YoY"
+            )
+
+    # Margin movement
+    if margin_change_bps_yoy is not None:
+        if margin_change_bps_yoy >= 100:
+            score += 2
+            positives.append(
+                f"Margin expanded by {margin_change_bps_yoy:.0f} bps YoY"
+            )
+
+        elif margin_change_bps_yoy >= 25:
+            score += 1
+            positives.append(
+                f"Margin improved by {margin_change_bps_yoy:.0f} bps YoY"
+            )
+
+        elif margin_change_bps_yoy <= -100:
+            concerns.append(
+                f"Margin contracted by {margin_change_bps_yoy:.0f} bps YoY"
+            )
+
+    # QoQ direction
+    if revenue_qoq is not None and profit_qoq is not None:
+        if revenue_qoq > 0 and profit_qoq > 0:
+            score += 1
+            positives.append(
+                "Sequential revenue and profit momentum is positive"
+            )
+
+        elif revenue_qoq < 0 and profit_qoq < 0:
+            concerns.append(
+                "Sequential revenue and profit momentum is negative"
+            )
+
+    # Sector KPI trend
+    if operating_kpi_trend == "Improving":
+        score += 2
+        positives.append(
+            "Sector-specific operating KPIs are improving"
+        )
+
+    elif operating_kpi_trend == "Stable":
+        score += 1
+        positives.append(
+            "Sector-specific operating KPIs are stable"
+        )
+
+    elif operating_kpi_trend == "Deteriorating":
+        concerns.append(
+            "Sector-specific operating KPIs are deteriorating"
+        )
+
+    # Guidance
+    if management_guidance == "Positive":
+        score += 1
+        positives.append(
+            "Management guidance is positive"
+        )
+
+    elif management_guidance == "Negative":
+        concerns.append(
+            "Management guidance is negative"
+        )
+
+    # Final quarterly classification
+    if score >= 9:
+        rating = "Strong / Strengthening"
+
+    elif score >= 6:
+        rating = "Strong"
+
+    elif score >= 4:
+        rating = "Early Recovery"
+
+    elif score >= 2:
+        rating = "Mixed"
+
+    else:
+        rating = "Weak / Deteriorating"
+
+    return {
+        "score": score,
+        "rating": rating,
+        "positives": positives,
+        "concerns": concerns,
+    }
+
+
+def calculate_combined_fundamental_status(
+    annual_assessment,
+    quarterly_assessment,
+):
+    """Combines long-term quality with recent financial momentum."""
+
+    annual_rating = annual_assessment.get(
+        "rating",
+        "Weak",
+    )
+
+    quarterly_rating = quarterly_assessment.get(
+        "rating",
+        "Weak / Deteriorating",
+    )
+
+    annual_score = annual_assessment.get(
+        "score",
+        0,
+    )
+
+    quarterly_score = quarterly_assessment.get(
+        "score",
+        0,
+    )
+
+    combined_score = (
+        annual_score * 0.60
+        + quarterly_score * 0.40
+    )
+
+    if (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Strong / Strengthening"
+    ):
+        combined_rating = "Strong / Accelerating"
+
+    elif (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Strong"
+    ):
+        combined_rating = "Strong"
+
+    elif (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Early Recovery"
+    ):
+        combined_rating = "Strong / Recovering"
+
+    elif (
+        annual_rating == "Stable"
+        and quarterly_rating == "Strong / Strengthening"
+    ):
+        combined_rating = "Improving / Accelerating"
+
+    elif quarterly_rating == "Early Recovery":
+        combined_rating = "Early Recovery"
+
+    elif (
+        annual_rating == "Weak"
+        and quarterly_rating == "Weak / Deteriorating"
+    ):
+        combined_rating = "Weak / Deteriorating"
+
+    elif combined_score >= 7:
+        combined_rating = "Strong"
+
+    elif combined_score >= 4:
+        combined_rating = "Mixed"
+
+    else:
+        combined_rating = "Weak"
+
+    return {
+        "score": round(combined_score, 2),
+        "rating": combined_rating,
+    }
+
+
+def determine_fundamental_transition(
+    annual_rating,
+    quarterly_rating,
+):
+    """Returns a readable fundamental transition label."""
+
+    if (
+        annual_rating == "Weak"
+        and quarterly_rating == "Early Recovery"
+    ):
+        return "Weak → Early Recovery"
+
+    if (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Early Recovery"
+    ):
+        return "Strong base → Early Recovery"
+
+    if (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Strong / Strengthening"
+    ):
+        return "Early Recovery → Strong / Accelerating"
+
+    if (
+        annual_rating in [
+            "Strong",
+            "Strong / Improving",
+        ]
+        and quarterly_rating == "Strong"
+    ):
+        return "Strong → Strong / Stable"
+
+    if quarterly_rating == "Weak / Deteriorating":
+        return "Momentum deterioration"
+
+    if quarterly_rating == "Mixed":
+        return "Mixed / transition unclear"
+
+    return "Stable / under observation"
+
+
+
 
 # =============================================================================
 # CHART FUNCTION

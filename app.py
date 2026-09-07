@@ -1613,7 +1613,144 @@ def determine_fundamental_transition(
 
     return "Stable / under observation"
 
+# =============================================================================
+# SECTOR-SPECIFIC FUNDAMENTAL KPI DEFINITIONS
+# =============================================================================
 
+SECTOR_KPI_LIBRARY = {
+    "Banks / NBFCs": [
+        "NIM",
+        "GNPA",
+        "NNPA",
+        "Credit Cost",
+        "CASA Ratio",
+        "Loan Growth",
+        "Deposit Growth",
+        "Capital Adequacy Ratio",
+        "ROA",
+        "ROE",
+        "Cost to Income Ratio",
+        "Provision Coverage Ratio",
+    ],
+
+    "Insurance": [
+        "VNB",
+        "VNB Growth",
+        "VNB Margin",
+        "APE Growth",
+        "Persistency Ratio",
+        "Solvency Ratio",
+        "Combined Ratio",
+        "Embedded Value Growth",
+    ],
+
+    "EPC / Capital Goods / Defence": [
+        "Order Book",
+        "Order Inflow",
+        "Order Book Growth",
+        "Book to Bill Ratio",
+        "Execution Rate",
+        "Revenue Growth",
+        "EBITDA Margin",
+        "Working Capital Days",
+    ],
+
+    "IT Services": [
+        "Constant Currency Growth",
+        "Deal Wins",
+        "TCV",
+        "Attrition",
+        "Utilization",
+        "EBIT Margin",
+        "Digital Revenue Mix",
+        "Revenue per Employee",
+    ],
+
+    "Auto": [
+        "Volume Growth",
+        "Domestic Volume Growth",
+        "Export Volume Growth",
+        "Realization Growth",
+        "EBITDA per Unit",
+        "Market Share",
+        "EV Mix",
+        "Premium Segment Mix",
+    ],
+
+    "Cement": [
+        "Volume Growth",
+        "Realization per Tonne",
+        "EBITDA per Tonne",
+        "Capacity Utilization",
+        "Capacity Addition",
+        "Fuel Cost per Tonne",
+    ],
+
+    "Metals / Mining": [
+        "Production Growth",
+        "Sales Volume Growth",
+        "Realization per Tonne",
+        "Cost per Tonne",
+        "EBITDA per Tonne",
+        "Capacity Utilization",
+        "Commodity Price Trend",
+    ],
+
+    "Telecom": [
+        "ARPU",
+        "Subscriber Growth",
+        "Churn Rate",
+        "Data Usage",
+        "4G / 5G Subscriber Additions",
+        "Capex",
+        "EBITDA Margin",
+        "Net Debt",
+    ],
+
+    "Real Estate": [
+        "Pre-sales",
+        "Booking Value",
+        "Collections",
+        "New Launches",
+        "Net Debt",
+        "Inventory",
+        "Unsold Inventory",
+        "Cash Flow from Operations",
+    ],
+
+    "Oil & Gas / Refining": [
+        "GRM",
+        "Throughput",
+        "Crude Production",
+        "Gas Production",
+        "Realization",
+        "Refining Margin",
+        "Reserve Replacement Ratio",
+        "Sales Volume Growth",
+    ],
+
+    "Retail / FMCG": [
+        "Same Store Sales Growth",
+        "Volume Growth",
+        "Value Growth",
+        "Gross Margin",
+        "Store Additions",
+        "Store Productivity",
+        "Private Label Mix",
+        "Distribution Expansion",
+    ],
+
+    "Pharma": [
+        "US Sales Growth",
+        "India Sales Growth",
+        "ANDA Filings",
+        "ANDA Approvals",
+        "R&D as Percentage of Sales",
+        "Product Concentration",
+        "Complex Generics Mix",
+        "API Revenue Growth",
+    ],
+}
 
 
 # =============================================================================

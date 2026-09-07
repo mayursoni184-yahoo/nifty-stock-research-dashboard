@@ -2154,7 +2154,168 @@ if mode == "Stock research":
                 "Value",
             ],
         )
+st.divider()
 
+st.subheader("📈 Annual and Quarterly Fundamental Momentum")
+
+st.caption(
+    "This section is designed to combine long-term business quality "
+    "with recent quarterly momentum. Values not available from the "
+    "current data source will display as unavailable until a dedicated "
+    "NSE/XBRL or company-results ingestion pipeline is connected."
+)
+
+# -------------------------------------------------------------------------
+# TEMPORARY DATA INPUT STRUCTURE
+# -------------------------------------------------------------------------
+#
+# For now, these are placeholders that can be populated by:
+#
+# 1. NSE XBRL financial results
+# 2. Company quarterly presentation extraction
+# 3. Manual data entry
+# 4. Supabase/PostgreSQL database
+# 5. A licensed Indian market-data provider
+#
+# The scoring engine is ready now; the remaining task is data ingestion.
+# -------------------------------------------------------------------------
+
+annual_financial_data = {
+    "revenue_cagr_3y": None,
+    "profit_cagr_3y": None,
+    "eps_cagr_3y": None,
+    "roe": None,
+    "roce": None,
+    "operating_margin": None,
+    "margin_trend_bps": None,
+    "debt_to_equity": None,
+    "interest_coverage": None,
+    "free_cash_flow_positive": None,
+    "cash_flow_conversion": None,
+}
+
+quarterly_financial_data = {
+    "revenue_yoy": None,
+    "profit_yoy": None,
+    "eps_yoy": None,
+    "ebitda_yoy": None,
+    "margin_change_bps_yoy": None,
+    "revenue_qoq": None,
+    "profit_qoq": None,
+    "operating_kpi_trend": None,
+    "management_guidance": None,
+}
+
+annual_assessment = assess_annual_fundamentals(
+    annual_financial_data
+)
+
+quarterly_assessment = assess_quarterly_fundamentals(
+    quarterly_financial_data
+)
+
+combined_assessment = calculate_combined_fundamental_status(
+    annual_assessment,
+    quarterly_assessment,
+)
+
+transition = determine_fundamental_transition(
+    annual_assessment["rating"],
+    quarterly_assessment["rating"],
+)
+
+fundamental_col1, fundamental_col2 = st.columns(2)
+
+with fundamental_col1:
+    st.markdown(
+        f"""
+        <div class="card">
+            <h4>Annual Fundamental Status</h4>
+            <h2>{annual_assessment["rating"]}</h2>
+            <p>Score: {annual_assessment["score"]}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with fundamental_col2:
+    st.markdown(
+        f"""
+        <div class="card">
+            <h4>Quarterly Fundamental Status</h4>
+            <h2>{quarterly_assessment["rating"]}</h2>
+            <p>Score: {quarterly_assessment["score"]}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+combined_col1, combined_col2 = st.columns(2)
+
+with combined_col1:
+    st.markdown(
+        f"""
+        <div class="card success-card">
+            <h4>Combined Fundamental Status</h4>
+            <h2>{combined_assessment["rating"]}</h2>
+            <p>Combined score: {combined_assessment["score"]}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with combined_col2:
+    st.markdown(
+        f"""
+        <div class="card warning-card">
+            <h4>Fundamental Transition</h4>
+            <h2>{transition}</h2>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown("### Annual positives")
+
+if annual_assessment["positives"]:
+    for item in annual_assessment["positives"]:
+        st.success(f"✅ {item}")
+else:
+    st.info(
+        "Annual financial history has not yet been loaded "
+        "from NSE/XBRL or another financial-results source."
+    )
+
+st.markdown("### Annual concerns")
+
+if annual_assessment["concerns"]:
+    for item in annual_assessment["concerns"]:
+        st.warning(f"⚠️ {item}")
+else:
+    st.caption(
+        "No annual risk flags are currently available."
+    )
+
+st.markdown("### Quarterly positives")
+
+if quarterly_assessment["positives"]:
+    for item in quarterly_assessment["positives"]:
+        st.success(f"✅ {item}")
+else:
+    st.info(
+        "Quarterly financial and operating KPI data "
+        "has not yet been loaded."
+    )
+
+st.markdown("### Quarterly concerns")
+
+if quarterly_assessment["concerns"]:
+    for item in quarterly_assessment["concerns"]:
+        st.warning(f"⚠️ {item}")
+else:
+    st.caption(
+        "No quarterly risk flags are currently available."
+    )
         st.dataframe(
             fundamentals_table,
             hide_index=True,

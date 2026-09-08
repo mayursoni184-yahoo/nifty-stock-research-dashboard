@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 
 
 # =============================================================================
-# APP CONFIGURATION
+# PAGE CONFIGURATION
 # =============================================================================
 
 st.set_page_config(
@@ -19,6 +19,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+# =============================================================================
+# STYLING
+# =============================================================================
+
 st.markdown(
     """
     <style>
@@ -26,32 +31,32 @@ st.markdown(
             font-size: 2.3rem;
             font-weight: 800;
             color: #111827;
-            margin-bottom: 0.15rem;
+            margin-bottom: 0.2rem;
         }
 
         .title-sub {
-            color: #6b7280;
             font-size: 1rem;
+            color: #6b7280;
             margin-bottom: 1.2rem;
         }
 
         .research-card {
+            background-color: #ffffff;
             border: 1px solid #e5e7eb;
             border-radius: 12px;
-            padding: 15px;
-            background-color: white;
+            padding: 16px;
             margin-bottom: 12px;
         }
 
-        .positive-card {
+        .green-card {
             border-left: 5px solid #16a34a;
         }
 
-        .neutral-card {
+        .orange-card {
             border-left: 5px solid #f59e0b;
         }
 
-        .negative-card {
+        .red-card {
             border-left: 5px solid #dc2626;
         }
     </style>
@@ -68,6 +73,8 @@ NIFTY_TOTAL_MARKET_CSV = (
     "https://niftyindices.com/IndexConstituent/"
     "ind_niftytotalmarket_list.csv"
 )
+
+NIFTY_50_BENCHMARK = "^NSEI"
 
 FALLBACK_SYMBOLS = [
     "RELIANCE",
@@ -106,12 +113,6 @@ PATTERN_OPTIONS = [
     "Reversal Top",
 ]
 
-TIMEFRAMES = [
-    "Daily",
-    "Weekly",
-    "Monthly",
-]
-
 TREND_OPTIONS = [
     "Any",
     "Strong bullish",
@@ -121,130 +122,23 @@ TREND_OPTIONS = [
     "Insufficient data",
 ]
 
-PATTERN_STATUS_OPTIONS = [
+RS_STATUS_OPTIONS = [
     "Any",
-    "Confirmed",
-    "In progress",
-    "Candidate",
+    "Leader",
+    "Strong",
+    "Neutral",
+    "Weak",
+    "Insufficient data",
 ]
 
-SECTOR_KPI_LIBRARY = {
-    "Banks / NBFCs": [
-        "NIM",
-        "GNPA",
-        "NNPA",
-        "Credit Cost",
-        "CASA Ratio",
-        "Loan Growth",
-        "Deposit Growth",
-        "Capital Adequacy Ratio",
-        "ROA",
-        "ROE",
-        "Provision Coverage Ratio",
-        "Cost to Income Ratio",
-    ],
-    "Insurance": [
-        "VNB",
-        "VNB Growth",
-        "VNB Margin",
-        "APE Growth",
-        "Persistency Ratio",
-        "Solvency Ratio",
-        "Combined Ratio",
-        "Embedded Value Growth",
-    ],
-    "EPC / Capital Goods / Defence": [
-        "Order Book",
-        "Order Inflow",
-        "Order Book Growth",
-        "Book to Bill Ratio",
-        "Execution Rate",
-        "Working Capital Days",
-        "EBITDA Margin",
-    ],
-    "IT Services": [
-        "Constant Currency Growth",
-        "Deal Wins",
-        "TCV",
-        "Attrition",
-        "Utilization",
-        "EBIT Margin",
-        "Digital Revenue Mix",
-        "Revenue per Employee",
-    ],
-    "Auto": [
-        "Volume Growth",
-        "Domestic Volume Growth",
-        "Export Volume Growth",
-        "Realization Growth",
-        "EBITDA per Unit",
-        "Market Share",
-        "EV Mix",
-        "Premium Segment Mix",
-    ],
-    "Cement": [
-        "Volume Growth",
-        "Realization per Tonne",
-        "EBITDA per Tonne",
-        "Capacity Utilization",
-        "Capacity Addition",
-        "Fuel Cost per Tonne",
-    ],
-    "Metals / Mining": [
-        "Production Growth",
-        "Sales Volume Growth",
-        "Realization per Tonne",
-        "Cost per Tonne",
-        "EBITDA per Tonne",
-        "Commodity Price Trend",
-    ],
-    "Telecom": [
-        "ARPU",
-        "Subscriber Growth",
-        "Churn Rate",
-        "Data Usage",
-        "4G / 5G Subscriber Additions",
-        "Capex",
-        "EBITDA Margin",
-        "Net Debt",
-    ],
-    "Real Estate": [
-        "Pre-sales",
-        "Booking Value",
-        "Collections",
-        "New Launches",
-        "Net Debt",
-        "Inventory",
-        "Unsold Inventory",
-    ],
-    "Oil & Gas / Refining": [
-        "GRM",
-        "Throughput",
-        "Crude Production",
-        "Gas Production",
-        "Realization",
-        "Refining Margin",
-        "Reserve Replacement Ratio",
-    ],
-    "Retail / FMCG": [
-        "Same Store Sales Growth",
-        "Volume Growth",
-        "Value Growth",
-        "Gross Margin",
-        "Store Additions",
-        "Store Productivity",
-        "Private Label Mix",
-    ],
-    "Pharma": [
-        "US Sales Growth",
-        "India Sales Growth",
-        "ANDA Filings",
-        "ANDA Approvals",
-        "R&D as Percentage of Sales",
-        "Product Concentration",
-        "Complex Generics Mix",
-    ],
-}
+ALIGNMENT_OPTIONS = [
+    "Any",
+    "Strong multi-timeframe alignment",
+    "Bullish multi-timeframe alignment",
+    "Mixed timeframe alignment",
+    "Bearish multi-timeframe alignment",
+    "Insufficient data",
+]
 
 
 # =============================================================================
@@ -252,7 +146,7 @@ SECTOR_KPI_LIBRARY = {
 # =============================================================================
 
 def safe_number(value, default=None):
-    """Safely converts a value into float."""
+    """Safely converts a value to float."""
 
     try:
         if value is None:
@@ -267,90 +161,55 @@ def safe_number(value, default=None):
         return default
 
 
-def format_number(value, percentage=False, currency=False):
-    """Formats values safely for dashboard display."""
+def format_percentage(value):
+    """Formats a percentage safely."""
 
     value = safe_number(value)
 
     if value is None:
         return "Not available"
 
-    if currency:
-        return f"₹{value:,.2f}"
-
-    if percentage:
-        return f"{value:.2f}%"
-
-    return f"{value:.2f}"
+    return f"{value:+.2f}%"
 
 
-def calculate_percentage_change(current_value, previous_value):
-    """Calculates a percentage change without converting missing values to zero."""
+def format_price(value):
+    """Formats an INR price safely."""
 
-    current_value = safe_number(current_value)
-    previous_value = safe_number(previous_value)
+    value = safe_number(value)
 
-    if current_value is None:
-        return None
+    if value is None:
+        return "Not available"
 
-    if previous_value is None:
-        return None
-
-    if previous_value == 0:
-        return None
-
-    return (
-        (current_value - previous_value)
-        / abs(previous_value)
-    ) * 100
+    return f"₹{value:,.2f}"
 
 
-def calculate_cagr(start_value, end_value, years):
-    """Calculates CAGR where valid positive values are available."""
+def format_market_cap(value):
+    """Formats market capitalization in crore rupees."""
 
-    start_value = safe_number(start_value)
-    end_value = safe_number(end_value)
-    years = safe_number(years)
+    value = safe_number(value)
 
-    if start_value is None:
-        return None
+    if value is None or value <= 0:
+        return "Not available"
 
-    if end_value is None:
-        return None
+    market_cap_crore = value / 10000000
 
-    if years is None:
-        return None
-
-    if start_value <= 0:
-        return None
-
-    if end_value <= 0:
-        return None
-
-    if years <= 0:
-        return None
-
-    return (
-        (
-            end_value / start_value
-        ) ** (1 / years) - 1
-    ) * 100
+    return f"₹{market_cap_crore:,.0f} Cr"
 
 
 # =============================================================================
-# NIFTY TOTAL MARKET CONSTITUENTS
+# UNIVERSE DATA
 # =============================================================================
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_nifty_total_market_members():
     """
-    Retrieves the Nifty Total Market constituent list.
+    Loads official Nifty Total Market constituents.
 
-    If external constituent data is unavailable, the dashboard uses
-    a smaller fallback list instead of failing to load.
+    Uses a fallback stock list if the external Nifty Indices file is
+    unavailable or does not respond in 15 seconds.
     """
 
-    request_headers = {
+    headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 "
@@ -363,52 +222,52 @@ def get_nifty_total_market_members():
     try:
         response = requests.get(
             NIFTY_TOTAL_MARKET_CSV,
-            headers=request_headers,
+            headers=headers,
             timeout=15,
         )
 
         response.raise_for_status()
 
-        universe = pd.read_csv(
+        members = pd.read_csv(
             io.BytesIO(response.content)
         )
 
-        universe.columns = [
+        members.columns = [
             str(column).strip()
-            for column in universe.columns
+            for column in members.columns
         ]
 
-        if "Symbol" not in universe.columns:
+        if "Symbol" not in members.columns:
             raise ValueError(
-                "Constituent data does not contain Symbol."
+                "The constituent file has no Symbol column."
             )
 
-        if "Series" in universe.columns:
-            universe = universe[
-                universe["Series"]
+        if "Series" in members.columns:
+            members = members[
+                members["Series"]
                 .astype(str)
                 .str.upper()
                 .eq("EQ")
             ].copy()
 
-        universe["Symbol"] = (
-            universe["Symbol"]
+        members["Symbol"] = (
+            members["Symbol"]
             .astype(str)
             .str.upper()
             .str.strip()
         )
 
-        universe["Ticker"] = (
-            universe["Symbol"] + ".NS"
+        members["Ticker"] = (
+            members["Symbol"] + ".NS"
         )
 
-        if "Company Name" not in universe.columns:
-            universe["Company Name"] = universe["Symbol"]
+        if "Company Name" not in members.columns:
+            members["Company Name"] = members["Symbol"]
 
-        if "Industry" not in universe.columns:
-            universe["Industry"] = "Unknown"
+        if "Industry" not in members.columns:
+            members["Industry"] = "Unknown"
 
-        universe = universe[
+        members = members[
             [
                 "Company Name",
                 "Industry",
@@ -417,21 +276,21 @@ def get_nifty_total_market_members():
             ]
         ]
 
-        universe = (
-            universe
+        members = (
+            members
             .drop_duplicates("Symbol")
             .reset_index(drop=True)
         )
 
-        if len(universe) < 100:
+        if len(members) < 100:
             raise ValueError(
-                "Too few valid Nifty Total Market constituents loaded."
+                "Too few Nifty Total Market constituents received."
             )
 
-        return universe, None
+        return members, None
 
     except Exception as error:
-        fallback_universe = pd.DataFrame(
+        fallback_members = pd.DataFrame(
             {
                 "Company Name": FALLBACK_SYMBOLS,
                 "Industry": "Fallback universe",
@@ -443,39 +302,36 @@ def get_nifty_total_market_members():
             }
         )
 
-        warning_message = (
-            "Live Nifty Total Market constituents could not be loaded. "
-            f"Using {len(fallback_universe)} fallback stocks. "
-            f"Reason: {type(error).__name__}: {error}"
+        warning = (
+            "Could not retrieve the live Nifty Total Market constituent list. "
+            f"Using fallback stocks. Reason: {type(error).__name__}: {error}"
         )
 
-        return fallback_universe, warning_message
+        return fallback_members, warning
 
 
 # =============================================================================
-# MARKET DATA FUNCTIONS
+# PRICE AND FUNDAMENTAL DATA
 # =============================================================================
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_price_data(ticker, period="5y"):
-    """Fetches price history from Yahoo Finance."""
+    """Fetches daily OHLCV data from Yahoo Finance."""
 
     try:
         stock = yf.Ticker(ticker)
 
-        price_data = stock.history(
+        data = stock.history(
             period=period,
             auto_adjust=True,
         )
 
-        if price_data is None or price_data.empty:
+        if data is None or data.empty:
             return pd.DataFrame()
 
-        price_data = price_data.rename(
-            columns=str.lower
-        )
+        data = data.rename(columns=str.lower)
 
-        required_columns = [
+        columns = [
             "open",
             "high",
             "low",
@@ -483,30 +339,24 @@ def fetch_price_data(ticker, period="5y"):
             "volume",
         ]
 
-        price_data = price_data[
-            required_columns
-        ].dropna()
+        data = data[columns].dropna()
 
-        price_data.index = pd.to_datetime(
-            price_data.index
-        )
+        data.index = pd.to_datetime(data.index)
 
-        if getattr(price_data.index, "tz", None) is not None:
-            price_data.index = (
-                price_data.index.tz_localize(None)
-            )
+        if getattr(data.index, "tz", None) is not None:
+            data.index = data.index.tz_localize(None)
 
-        return price_data
+        return data
 
     except Exception:
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=43200, show_spinner=False)
-def fetch_basic_fundamentals(ticker):
-    """Fetches basic Yahoo Finance summary information."""
+def fetch_fundamentals(ticker):
+    """Fetches basic available Yahoo Finance company information."""
 
-    fields = [
+    required_fields = [
         "marketCap",
         "sector",
         "industry",
@@ -522,1230 +372,45 @@ def fetch_basic_fundamentals(ticker):
         "revenueGrowth",
         "earningsGrowth",
         "freeCashflow",
-        "operatingCashflow",
         "dividendYield",
         "fiftyTwoWeekHigh",
         "fiftyTwoWeekLow",
     ]
 
     try:
-        company = yf.Ticker(ticker)
-        company_info = company.get_info()
+        stock = yf.Ticker(ticker)
+        stock_info = stock.get_info()
 
         return {
-            field: company_info.get(field)
-            for field in fields
+            field: stock_info.get(field)
+            for field in required_fields
         }
 
     except Exception:
         return {}
 
 
-@st.cache_data(ttl=43200, show_spinner=False)
-def fetch_financial_statements(ticker):
-    """
-    Fetches annual and quarterly financial statements.
-
-    Data is not forced to zero. Missing statement data remains empty
-    and is handled as insufficient evidence in the dashboard.
-    """
-
-    empty_dataframe = pd.DataFrame()
-
-    try:
-        company = yf.Ticker(ticker)
-
-        annual_income = company.income_stmt
-        quarterly_income = company.quarterly_income_stmt
-
-        annual_balance_sheet = company.balance_sheet
-        quarterly_balance_sheet = company.quarterly_balance_sheet
-
-        annual_cashflow = company.cashflow
-        quarterly_cashflow = company.quarterly_cashflow
-
-        return {
-            "annual_income": (
-                annual_income
-                if annual_income is not None
-                else empty_dataframe
-            ),
-            "quarterly_income": (
-                quarterly_income
-                if quarterly_income is not None
-                else empty_dataframe
-            ),
-            "annual_balance_sheet": (
-                annual_balance_sheet
-                if annual_balance_sheet is not None
-                else empty_dataframe
-            ),
-            "quarterly_balance_sheet": (
-                quarterly_balance_sheet
-                if quarterly_balance_sheet is not None
-                else empty_dataframe
-            ),
-            "annual_cashflow": (
-                annual_cashflow
-                if annual_cashflow is not None
-                else empty_dataframe
-            ),
-            "quarterly_cashflow": (
-                quarterly_cashflow
-                if quarterly_cashflow is not None
-                else empty_dataframe
-            ),
-        }
-
-    except Exception:
-        return {
-            "annual_income": empty_dataframe,
-            "quarterly_income": empty_dataframe,
-            "annual_balance_sheet": empty_dataframe,
-            "quarterly_balance_sheet": empty_dataframe,
-            "annual_cashflow": empty_dataframe,
-            "quarterly_cashflow": empty_dataframe,
-        }
-
-
 # =============================================================================
-# FINANCIAL STATEMENT EXTRACTION
+# RESAMPLING AND TREND ANALYSIS
 # =============================================================================
 
-def find_statement_row(statement, candidate_names):
-    """
-    Finds a financial statement row using multiple possible Yahoo labels.
-    """
-
-    if statement is None or statement.empty:
-        return None
-
-    for name in candidate_names:
-        if name in statement.index:
-            row = statement.loc[name]
-
-            if isinstance(row, pd.DataFrame):
-                row = row.iloc[0]
-
-            return pd.to_numeric(
-                row,
-                errors="coerce",
-            )
-
-    return None
-
-
-def get_statement_value(
-    statement,
-    candidate_names,
-    position=0,
-):
-    """
-    Gets a value from a statement row.
-
-    position=0 is the latest reporting period.
-    position=1 is the previous period.
-    position=4 is generally the same quarter one year earlier,
-    if enough quarterly statement history is available.
-    """
-
-    row = find_statement_row(
-        statement,
-        candidate_names,
-    )
-
-    if row is None:
-        return None
-
-    clean_values = row.dropna()
-
-    if len(clean_values) <= position:
-        return None
-
-    try:
-        return float(clean_values.iloc[position])
-
-    except Exception:
-        return None
-
-
-def get_statement_dates(statement):
-    """Returns readable reporting dates from a financial statement."""
-
-    if statement is None or statement.empty:
-        return []
-
-    reporting_dates = []
-
-    for column in statement.columns:
-        try:
-            reporting_dates.append(
-                pd.to_datetime(column).strftime(
-                    "%d-%b-%Y"
-                )
-            )
-
-        except Exception:
-            reporting_dates.append(str(column))
-
-    return reporting_dates
-
-
-def extract_annual_financial_data(
-    statements,
-    yahoo_fundamentals,
-):
-    """Extracts reported and calculated annual metrics."""
-
-    annual_income = statements["annual_income"]
-    annual_balance = statements["annual_balance_sheet"]
-    annual_cashflow = statements["annual_cashflow"]
-
-    revenue_rows = [
-        "Total Revenue",
-        "Operating Revenue",
-        "Revenue",
-    ]
-
-    profit_rows = [
-        "Net Income",
-        "Net Income Common Stockholders",
-        "Net Income Applicable To Common Shares",
-    ]
-
-    ebitda_rows = [
-        "EBITDA",
-        "Normalized EBITDA",
-    ]
-
-    operating_income_rows = [
-        "Operating Income",
-        "EBIT",
-    ]
-
-    revenue_latest = get_statement_value(
-        annual_income,
-        revenue_rows,
-        0,
-    )
-
-    revenue_previous = get_statement_value(
-        annual_income,
-        revenue_rows,
-        1,
-    )
-
-    revenue_three_years_ago = get_statement_value(
-        annual_income,
-        revenue_rows,
-        3,
-    )
-
-    profit_latest = get_statement_value(
-        annual_income,
-        profit_rows,
-        0,
-    )
-
-    profit_previous = get_statement_value(
-        annual_income,
-        profit_rows,
-        1,
-    )
-
-    profit_three_years_ago = get_statement_value(
-        annual_income,
-        profit_rows,
-        3,
-    )
-
-    ebitda_latest = get_statement_value(
-        annual_income,
-        ebitda_rows,
-        0,
-    )
-
-    ebitda_previous = get_statement_value(
-        annual_income,
-        ebitda_rows,
-        1,
-    )
-
-    operating_income_latest = get_statement_value(
-        annual_income,
-        operating_income_rows,
-        0,
-    )
-
-    operating_income_previous = get_statement_value(
-        annual_income,
-        operating_income_rows,
-        1,
-    )
-
-    free_cashflow_latest = get_statement_value(
-        annual_cashflow,
-        [
-            "Free Cash Flow",
-        ],
-        0,
-    )
-
-    operating_cashflow_latest = get_statement_value(
-        annual_cashflow,
-        [
-            "Operating Cash Flow",
-            "Total Cash From Operating Activities",
-        ],
-        0,
-    )
-
-    total_debt_latest = get_statement_value(
-        annual_balance,
-        [
-            "Total Debt",
-            "Long Term Debt",
-        ],
-        0,
-    )
-
-    total_equity_latest = get_statement_value(
-        annual_balance,
-        [
-            "Stockholders Equity",
-            "Common Stock Equity",
-            "Total Equity Gross Minority Interest",
-        ],
-        0,
-    )
-
-    operating_margin_latest = None
-    operating_margin_previous = None
-
-    if (
-        operating_income_latest is not None
-        and revenue_latest is not None
-        and revenue_latest != 0
-    ):
-        operating_margin_latest = (
-            operating_income_latest
-            / revenue_latest
-        ) * 100
-
-    if (
-        operating_income_previous is not None
-        and revenue_previous is not None
-        and revenue_previous != 0
-    ):
-        operating_margin_previous = (
-            operating_income_previous
-            / revenue_previous
-        ) * 100
-
-    margin_change_bps = None
-
-    if (
-        operating_margin_latest is not None
-        and operating_margin_previous is not None
-    ):
-        margin_change_bps = (
-            operating_margin_latest
-            - operating_margin_previous
-        ) * 100
-
-    debt_to_equity = None
-
-    if (
-        total_debt_latest is not None
-        and total_equity_latest is not None
-        and total_equity_latest != 0
-    ):
-        debt_to_equity = (
-            total_debt_latest
-            / total_equity_latest
-        )
-
-    roe = None
-
-    yahoo_roe = safe_number(
-        yahoo_fundamentals.get("returnOnEquity")
-    )
-
-    if yahoo_roe is not None:
-        roe = yahoo_roe * 100
-
-    elif (
-        profit_latest is not None
-        and total_equity_latest is not None
-        and total_equity_latest != 0
-    ):
-        roe = (
-            profit_latest
-            / total_equity_latest
-        ) * 100
-
-    return {
-        "revenue_latest": revenue_latest,
-        "revenue_previous": revenue_previous,
-        "profit_latest": profit_latest,
-        "profit_previous": profit_previous,
-        "ebitda_latest": ebitda_latest,
-        "ebitda_previous": ebitda_previous,
-        "revenue_yoy": calculate_percentage_change(
-            revenue_latest,
-            revenue_previous,
-        ),
-        "profit_yoy": calculate_percentage_change(
-            profit_latest,
-            profit_previous,
-        ),
-        "ebitda_yoy": calculate_percentage_change(
-            ebitda_latest,
-            ebitda_previous,
-        ),
-        "revenue_cagr_3y": calculate_cagr(
-            revenue_three_years_ago,
-            revenue_latest,
-            3,
-        ),
-        "profit_cagr_3y": calculate_cagr(
-            profit_three_years_ago,
-            profit_latest,
-            3,
-        ),
-        "roe": roe,
-        "roce": None,
-        "operating_margin": operating_margin_latest,
-        "margin_trend_bps": margin_change_bps,
-        "debt_to_equity": debt_to_equity,
-        "free_cash_flow_positive": (
-            free_cashflow_latest > 0
-            if free_cashflow_latest is not None
-            else None
-        ),
-        "free_cashflow": free_cashflow_latest,
-        "operating_cashflow": operating_cashflow_latest,
-        "report_dates": get_statement_dates(
-            annual_income
-        ),
-    }
-
-
-def extract_quarterly_financial_data(statements):
-    """
-    Extracts quarterly reported and calculated metrics.
-
-    Quarterly YoY is only calculated when Yahoo Finance contains at least
-    five available quarterly observations for a row.
-    """
-
-    quarterly_income = statements[
-        "quarterly_income"
-    ]
-
-    revenue_rows = [
-        "Total Revenue",
-        "Operating Revenue",
-        "Revenue",
-    ]
-
-    profit_rows = [
-        "Net Income",
-        "Net Income Common Stockholders",
-        "Net Income Applicable To Common Shares",
-    ]
-
-    ebitda_rows = [
-        "EBITDA",
-        "Normalized EBITDA",
-    ]
-
-    operating_income_rows = [
-        "Operating Income",
-        "EBIT",
-    ]
-
-    revenue_latest = get_statement_value(
-        quarterly_income,
-        revenue_rows,
-        0,
-    )
-
-    revenue_previous_quarter = get_statement_value(
-        quarterly_income,
-        revenue_rows,
-        1,
-    )
-
-    revenue_year_ago = get_statement_value(
-        quarterly_income,
-        revenue_rows,
-        4,
-    )
-
-    profit_latest = get_statement_value(
-        quarterly_income,
-        profit_rows,
-        0,
-    )
-
-    profit_previous_quarter = get_statement_value(
-        quarterly_income,
-        profit_rows,
-        1,
-    )
-
-    profit_year_ago = get_statement_value(
-        quarterly_income,
-        profit_rows,
-        4,
-    )
-
-    ebitda_latest = get_statement_value(
-        quarterly_income,
-        ebitda_rows,
-        0,
-    )
-
-    ebitda_previous_quarter = get_statement_value(
-        quarterly_income,
-        ebitda_rows,
-        1,
-    )
-
-    ebitda_year_ago = get_statement_value(
-        quarterly_income,
-        ebitda_rows,
-        4,
-    )
-
-    operating_income_latest = get_statement_value(
-        quarterly_income,
-        operating_income_rows,
-        0,
-    )
-
-    operating_income_year_ago = get_statement_value(
-        quarterly_income,
-        operating_income_rows,
-        4,
-    )
-
-    operating_margin_latest = None
-    operating_margin_year_ago = None
-
-    if (
-        operating_income_latest is not None
-        and revenue_latest is not None
-        and revenue_latest != 0
-    ):
-        operating_margin_latest = (
-            operating_income_latest
-            / revenue_latest
-        ) * 100
-
-    if (
-        operating_income_year_ago is not None
-        and revenue_year_ago is not None
-        and revenue_year_ago != 0
-    ):
-        operating_margin_year_ago = (
-            operating_income_year_ago
-            / revenue_year_ago
-        ) * 100
-
-    margin_change_bps_yoy = None
-
-    if (
-        operating_margin_latest is not None
-        and operating_margin_year_ago is not None
-    ):
-        margin_change_bps_yoy = (
-            operating_margin_latest
-            - operating_margin_year_ago
-        ) * 100
-
-    return {
-        "revenue_latest": revenue_latest,
-        "revenue_previous_quarter": revenue_previous_quarter,
-        "revenue_year_ago": revenue_year_ago,
-        "profit_latest": profit_latest,
-        "profit_previous_quarter": profit_previous_quarter,
-        "profit_year_ago": profit_year_ago,
-        "ebitda_latest": ebitda_latest,
-        "ebitda_previous_quarter": ebitda_previous_quarter,
-        "ebitda_year_ago": ebitda_year_ago,
-        "revenue_yoy": calculate_percentage_change(
-            revenue_latest,
-            revenue_year_ago,
-        ),
-        "profit_yoy": calculate_percentage_change(
-            profit_latest,
-            profit_year_ago,
-        ),
-        "ebitda_yoy": calculate_percentage_change(
-            ebitda_latest,
-            ebitda_year_ago,
-        ),
-        "revenue_qoq": calculate_percentage_change(
-            revenue_latest,
-            revenue_previous_quarter,
-        ),
-        "profit_qoq": calculate_percentage_change(
-            profit_latest,
-            profit_previous_quarter,
-        ),
-        "ebitda_qoq": calculate_percentage_change(
-            ebitda_latest,
-            ebitda_previous_quarter,
-        ),
-        "operating_margin": operating_margin_latest,
-        "margin_change_bps_yoy": margin_change_bps_yoy,
-        "report_dates": get_statement_dates(
-            quarterly_income
-        ),
-    }
-
-
-# =============================================================================
-# FUNDAMENTAL SCORING
-# =============================================================================
-
-def calculate_basic_fundamental_score(fundamentals):
-    """Calculates a basic 0–9 Yahoo Finance quality score."""
-
-    score = 0
-    strengths = []
-    concerns = []
-
-    roe = safe_number(
-        fundamentals.get("returnOnEquity")
-    )
-
-    debt_equity = safe_number(
-        fundamentals.get("debtToEquity")
-    )
-
-    profit_margin = safe_number(
-        fundamentals.get("profitMargins")
-    )
-
-    revenue_growth = safe_number(
-        fundamentals.get("revenueGrowth")
-    )
-
-    free_cashflow = safe_number(
-        fundamentals.get("freeCashflow")
-    )
-
-    if roe is not None:
-        if roe >= 0.20:
-            score += 2
-            strengths.append("ROE is at least 20%")
-
-        elif roe >= 0.15:
-            score += 1
-            strengths.append("ROE is at least 15%")
-
-        elif roe < 0.10:
-            concerns.append("ROE is below 10%")
-
-    if debt_equity is not None:
-        if debt_equity < 50:
-            score += 2
-            strengths.append("Low debt/equity")
-
-        elif debt_equity < 100:
-            score += 1
-            strengths.append("Moderate debt/equity")
-
-        elif debt_equity > 200:
-            concerns.append("High debt/equity")
-
-    if profit_margin is not None:
-        if profit_margin >= 0.15:
-            score += 2
-            strengths.append("Profit margin is at least 15%")
-
-        elif profit_margin >= 0.08:
-            score += 1
-            strengths.append("Profit margin is at least 8%")
-
-        elif profit_margin < 0.05:
-            concerns.append("Low profit margin")
-
-    if revenue_growth is not None:
-        if revenue_growth >= 0.12:
-            score += 1
-            strengths.append("Revenue growth is at least 12%")
-
-        elif revenue_growth < 0:
-            concerns.append("Revenue growth is negative")
-
-    if free_cashflow is not None:
-        if free_cashflow > 0:
-            score += 2
-            strengths.append("Positive free cash flow")
-
-        else:
-            concerns.append("Negative free cash flow")
-
-    if score >= 7:
-        rating = "Excellent"
-
-    elif score >= 5:
-        rating = "Good"
-
-    elif score >= 3:
-        rating = "Average"
-
-    else:
-        rating = "Needs review"
-
-    return score, rating, strengths, concerns
-
-
-def assess_annual_fundamentals(annual_data):
-    """
-    Assesses annual financial quality.
-
-    Crucially, it returns Insufficient data when less than three real
-    annual metrics are available. It does not call missing data weak.
-    """
-
-    score = 0
-    data_points = 0
-    positives = []
-    concerns = []
-
-    revenue_cagr = safe_number(
-        annual_data.get("revenue_cagr_3y")
-    )
-
-    profit_cagr = safe_number(
-        annual_data.get("profit_cagr_3y")
-    )
-
-    roe = safe_number(
-        annual_data.get("roe")
-    )
-
-    operating_margin = safe_number(
-        annual_data.get("operating_margin")
-    )
-
-    margin_trend_bps = safe_number(
-        annual_data.get("margin_trend_bps")
-    )
-
-    debt_to_equity = safe_number(
-        annual_data.get("debt_to_equity")
-    )
-
-    free_cash_flow_positive = annual_data.get(
-        "free_cash_flow_positive"
-    )
-
-    if revenue_cagr is not None:
-        data_points += 1
-
-        if revenue_cagr >= 15:
-            score += 2
-            positives.append(
-                f"Strong 3-year revenue CAGR: {revenue_cagr:.1f}%"
-            )
-
-        elif revenue_cagr >= 8:
-            score += 1
-            positives.append(
-                f"Healthy 3-year revenue CAGR: {revenue_cagr:.1f}%"
-            )
-
-        elif revenue_cagr < 0:
-            concerns.append(
-                f"Negative 3-year revenue CAGR: {revenue_cagr:.1f}%"
-            )
-
-    if profit_cagr is not None:
-        data_points += 1
-
-        if profit_cagr >= 15:
-            score += 2
-            positives.append(
-                f"Strong 3-year profit CAGR: {profit_cagr:.1f}%"
-            )
-
-        elif profit_cagr >= 8:
-            score += 1
-            positives.append(
-                f"Healthy 3-year profit CAGR: {profit_cagr:.1f}%"
-            )
-
-        elif profit_cagr < 0:
-            concerns.append(
-                f"Negative 3-year profit CAGR: {profit_cagr:.1f}%"
-            )
-
-    if roe is not None:
-        data_points += 1
-
-        if roe >= 20:
-            score += 2
-            positives.append(
-                f"Excellent ROE: {roe:.1f}%"
-            )
-
-        elif roe >= 15:
-            score += 1
-            positives.append(
-                f"Good ROE: {roe:.1f}%"
-            )
-
-        elif roe < 10:
-            concerns.append(
-                f"Low ROE: {roe:.1f}%"
-            )
-
-    if operating_margin is not None:
-        data_points += 1
-
-        if operating_margin >= 15:
-            score += 1
-            positives.append(
-                f"Healthy operating margin: {operating_margin:.1f}%"
-            )
-
-        elif operating_margin < 5:
-            concerns.append(
-                f"Low operating margin: {operating_margin:.1f}%"
-            )
-
-    if margin_trend_bps is not None:
-        data_points += 1
-
-        if margin_trend_bps >= 100:
-            score += 1
-            positives.append(
-                f"Margin expanded by {margin_trend_bps:.0f} bps"
-            )
-
-        elif margin_trend_bps <= -100:
-            concerns.append(
-                f"Margin contracted by {margin_trend_bps:.0f} bps"
-            )
-
-    if debt_to_equity is not None:
-        data_points += 1
-
-        if debt_to_equity <= 0.50:
-            score += 1
-            positives.append(
-                f"Low debt/equity: {debt_to_equity:.2f}"
-            )
-
-        elif debt_to_equity >= 2:
-            concerns.append(
-                f"High debt/equity: {debt_to_equity:.2f}"
-            )
-
-    if free_cash_flow_positive is not None:
-        data_points += 1
-
-        if free_cash_flow_positive:
-            score += 1
-            positives.append(
-                "Positive free cash flow"
-            )
-
-        else:
-            concerns.append(
-                "Negative free cash flow"
-            )
-
-    if data_points < 3:
-        rating = "Insufficient data"
-
-    elif score >= 8:
-        rating = "Strong"
-
-    elif score >= 5:
-        rating = "Strong / Improving"
-
-    elif score >= 3:
-        rating = "Stable"
-
-    elif score >= 1:
-        rating = "Mixed"
-
-    else:
-        rating = "Weak"
-
-    return {
-        "score": score,
-        "data_points": data_points,
-        "rating": rating,
-        "positives": positives,
-        "concerns": concerns,
-    }
-
-
-def assess_quarterly_fundamentals(quarterly_data):
-    """
-    Assesses quarterly business momentum.
-
-    Missing data returns Insufficient data instead of Weak.
-    """
-
-    score = 0
-    data_points = 0
-    positives = []
-    concerns = []
-
-    revenue_yoy = safe_number(
-        quarterly_data.get("revenue_yoy")
-    )
-
-    profit_yoy = safe_number(
-        quarterly_data.get("profit_yoy")
-    )
-
-    ebitda_yoy = safe_number(
-        quarterly_data.get("ebitda_yoy")
-    )
-
-    margin_change_bps_yoy = safe_number(
-        quarterly_data.get("margin_change_bps_yoy")
-    )
-
-    revenue_qoq = safe_number(
-        quarterly_data.get("revenue_qoq")
-    )
-
-    profit_qoq = safe_number(
-        quarterly_data.get("profit_qoq")
-    )
-
-    if revenue_yoy is not None:
-        data_points += 1
-
-        if revenue_yoy >= 15:
-            score += 2
-            positives.append(
-                f"Strong revenue growth: {revenue_yoy:.1f}% YoY"
-            )
-
-        elif revenue_yoy >= 8:
-            score += 1
-            positives.append(
-                f"Healthy revenue growth: {revenue_yoy:.1f}% YoY"
-            )
-
-        elif revenue_yoy < 0:
-            concerns.append(
-                f"Revenue declined: {revenue_yoy:.1f}% YoY"
-            )
-
-    if profit_yoy is not None:
-        data_points += 1
-
-        if profit_yoy >= 20:
-            score += 2
-            positives.append(
-                f"Strong profit growth: {profit_yoy:.1f}% YoY"
-            )
-
-        elif profit_yoy >= 10:
-            score += 1
-            positives.append(
-                f"Healthy profit growth: {profit_yoy:.1f}% YoY"
-            )
-
-        elif profit_yoy < 0:
-            concerns.append(
-                f"Profit declined: {profit_yoy:.1f}% YoY"
-            )
-
-    if ebitda_yoy is not None:
-        data_points += 1
-
-        if ebitda_yoy >= 15:
-            score += 1
-            positives.append(
-                f"Strong EBITDA growth: {ebitda_yoy:.1f}% YoY"
-            )
-
-        elif ebitda_yoy < 0:
-            concerns.append(
-                f"EBITDA declined: {ebitda_yoy:.1f}% YoY"
-            )
-
-    if margin_change_bps_yoy is not None:
-        data_points += 1
-
-        if margin_change_bps_yoy >= 100:
-            score += 2
-            positives.append(
-                f"Margin expanded by {margin_change_bps_yoy:.0f} bps YoY"
-            )
-
-        elif margin_change_bps_yoy >= 25:
-            score += 1
-            positives.append(
-                f"Margin improved by {margin_change_bps_yoy:.0f} bps YoY"
-            )
-
-        elif margin_change_bps_yoy <= -100:
-            concerns.append(
-                f"Margin contracted by {margin_change_bps_yoy:.0f} bps YoY"
-            )
-
-    if revenue_qoq is not None:
-        data_points += 1
-
-        if revenue_qoq > 0:
-            score += 1
-            positives.append(
-                f"Positive sequential revenue trend: {revenue_qoq:.1f}% QoQ"
-            )
-
-        elif revenue_qoq < 0:
-            concerns.append(
-                f"Negative sequential revenue trend: {revenue_qoq:.1f}% QoQ"
-            )
-
-    if profit_qoq is not None:
-        data_points += 1
-
-        if profit_qoq > 0:
-            score += 1
-            positives.append(
-                f"Positive sequential profit trend: {profit_qoq:.1f}% QoQ"
-            )
-
-        elif profit_qoq < 0:
-            concerns.append(
-                f"Negative sequential profit trend: {profit_qoq:.1f}% QoQ"
-            )
-
-    if data_points < 3:
-        rating = "Insufficient data"
-
-    elif score >= 7:
-        rating = "Strong / Strengthening"
-
-    elif score >= 5:
-        rating = "Strong"
-
-    elif score >= 3:
-        rating = "Early Recovery"
-
-    elif score >= 1:
-        rating = "Mixed"
-
-    else:
-        rating = "Weak / Deteriorating"
-
-    return {
-        "score": score,
-        "data_points": data_points,
-        "rating": rating,
-        "positives": positives,
-        "concerns": concerns,
-    }
-
-
-def calculate_combined_fundamental_status(
-    annual_assessment,
-    quarterly_assessment,
-):
-    """
-    Combines annual quality and quarterly momentum safely.
-    """
-
-    annual_rating = annual_assessment.get(
-        "rating",
-        "Insufficient data",
-    )
-
-    quarterly_rating = quarterly_assessment.get(
-        "rating",
-        "Insufficient data",
-    )
-
-    annual_score = annual_assessment.get(
-        "score",
-        0,
-    )
-
-    quarterly_score = quarterly_assessment.get(
-        "score",
-        0,
-    )
-
-    if (
-        annual_rating == "Insufficient data"
-        and quarterly_rating == "Insufficient data"
-    ):
-        return {
-            "score": None,
-            "rating": "Insufficient data",
-        }
-
-    if annual_rating == "Insufficient data":
-        return {
-            "score": quarterly_score,
-            "rating": (
-                "Quarterly view only / "
-                f"{quarterly_rating}"
-            ),
-        }
-
-    if quarterly_rating == "Insufficient data":
-        return {
-            "score": annual_score,
-            "rating": (
-                "Annual view only / "
-                f"{annual_rating}"
-            ),
-        }
-
-    combined_score = (
-        annual_score * 0.60
-        + quarterly_score * 0.40
-    )
-
-    if (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Strong / Strengthening"
-    ):
-        combined_rating = "Strong / Accelerating"
-
-    elif (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Strong"
-    ):
-        combined_rating = "Strong"
-
-    elif (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Early Recovery"
-    ):
-        combined_rating = "Strong / Recovering"
-
-    elif (
-        annual_rating == "Stable"
-        and quarterly_rating == "Strong / Strengthening"
-    ):
-        combined_rating = "Improving / Accelerating"
-
-    elif quarterly_rating == "Early Recovery":
-        combined_rating = "Early Recovery"
-
-    elif (
-        annual_rating == "Weak"
-        and quarterly_rating == "Weak / Deteriorating"
-    ):
-        combined_rating = "Weak / Deteriorating"
-
-    elif combined_score >= 6:
-        combined_rating = "Strong"
-
-    elif combined_score >= 3:
-        combined_rating = "Mixed"
-
-    else:
-        combined_rating = "Weak"
-
-    return {
-        "score": round(combined_score, 2),
-        "rating": combined_rating,
-    }
-
-
-def determine_fundamental_transition(
-    annual_rating,
-    quarterly_rating,
-):
-    """Creates an annual-to-quarterly business transition label."""
-
-    if annual_rating == "Insufficient data":
-        return "Annual evidence unavailable"
-
-    if quarterly_rating == "Insufficient data":
-        return "Quarterly evidence unavailable"
-
-    if (
-        annual_rating == "Weak"
-        and quarterly_rating == "Early Recovery"
-    ):
-        return "Weak → Early Recovery"
-
-    if (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Early Recovery"
-    ):
-        return "Strong base → Early Recovery"
-
-    if (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Strong / Strengthening"
-    ):
-        return "Early Recovery → Strong / Accelerating"
-
-    if (
-        annual_rating in [
-            "Strong",
-            "Strong / Improving",
-        ]
-        and quarterly_rating == "Strong"
-    ):
-        return "Strong → Strong / Stable"
-
-    if quarterly_rating == "Weak / Deteriorating":
-        return "Momentum deterioration"
-
-    if quarterly_rating == "Mixed":
-        return "Mixed / transition unclear"
-
-    return "Stable / under observation"
-
-
-# =============================================================================
-# TECHNICAL ANALYSIS FUNCTIONS
-# =============================================================================
-
-def resample_ohlcv(price_data, timeframe):
-    """Converts daily candles into weekly or monthly candles."""
-
-    if price_data.empty:
-        return price_data
+def resample_ohlcv(data, timeframe):
+    """Resamples daily OHLCV data into weekly or monthly candles."""
+
+    if data.empty:
+        return data
 
     if timeframe == "Daily":
-        return price_data.copy()
+        return data.copy()
 
     if timeframe == "Weekly":
-        resample_frequency = "W-FRI"
+        rule = "W-FRI"
     else:
-        resample_frequency = "ME"
+        rule = "ME"
 
     return (
-        price_data
-        .resample(resample_frequency)
+        data
+        .resample(rule)
         .agg(
             open=("open", "first"),
             high=("high", "max"),
@@ -1757,6 +422,548 @@ def resample_ohlcv(price_data, timeframe):
     )
 
 
+def calculate_overall_trend(data):
+    """
+    Calculates trend using 20, 50 and 200 moving averages.
+
+    Strong bullish:
+    Price > 20 MA > 50 MA > 200 MA
+
+    Bullish:
+    Price > 20 MA > 50 MA
+
+    Bearish:
+    Price < 20 MA < 50 MA
+    """
+
+    if data is None or len(data) < 55:
+        return "Insufficient data"
+
+    close = float(data["close"].iloc[-1])
+
+    moving_average_20 = float(
+        data["close"]
+        .rolling(20)
+        .mean()
+        .iloc[-1]
+    )
+
+    moving_average_50 = float(
+        data["close"]
+        .rolling(50)
+        .mean()
+        .iloc[-1]
+    )
+
+    if len(data) >= 200:
+        moving_average_200 = float(
+            data["close"]
+            .rolling(200)
+            .mean()
+            .iloc[-1]
+        )
+
+        if (
+            close > moving_average_20
+            > moving_average_50
+            > moving_average_200
+        ):
+            return "Strong bullish"
+
+    if (
+        close > moving_average_20
+        and moving_average_20 > moving_average_50
+    ):
+        return "Bullish"
+
+    if (
+        close < moving_average_20
+        and moving_average_20 < moving_average_50
+    ):
+        return "Bearish"
+
+    return "Neutral / consolidating"
+
+
+# =============================================================================
+# RELATIVE STRENGTH ENGINE
+# =============================================================================
+
+def calculate_return(data, trading_days):
+    """
+    Calculates stock return for a selected lookback.
+
+    Approximate lookbacks:
+    21 trading days = 1 month
+    63 trading days = 3 months
+    126 trading days = 6 months
+    252 trading days = 12 months
+    """
+
+    if data is None or data.empty:
+        return None
+
+    if len(data) <= trading_days:
+        return None
+
+    current_close = float(
+        data["close"].iloc[-1]
+    )
+
+    previous_close = float(
+        data["close"].iloc[-trading_days - 1]
+    )
+
+    if previous_close == 0:
+        return None
+
+    return (
+        current_close / previous_close - 1
+    ) * 100
+
+
+def align_stock_and_benchmark(
+    stock_data,
+    benchmark_data,
+):
+    """
+    Aligns stock and benchmark close prices by common trading dates.
+    """
+
+    if stock_data.empty or benchmark_data.empty:
+        return pd.DataFrame()
+
+    stock_close = stock_data[
+        ["close"]
+    ].rename(
+        columns={
+            "close": "stock_close",
+        }
+    )
+
+    benchmark_close = benchmark_data[
+        ["close"]
+    ].rename(
+        columns={
+            "close": "benchmark_close",
+        }
+    )
+
+    aligned_data = stock_close.join(
+        benchmark_close,
+        how="inner",
+    )
+
+    return aligned_data.dropna()
+
+
+def calculate_relative_strength(
+    stock_data,
+    benchmark_data,
+):
+    """
+    Calculates returns, relative returns and an RS status.
+
+    Relative Return = Stock Return - Benchmark Return.
+
+    RS line = Stock Close / Benchmark Close.
+    """
+
+    aligned_data = align_stock_and_benchmark(
+        stock_data,
+        benchmark_data,
+    )
+
+    if len(aligned_data) < 30:
+        return {
+            "status": "Insufficient data",
+            "rs_line": pd.Series(dtype=float),
+            "rs_trend": "Unavailable",
+            "stock_1m": None,
+            "stock_3m": None,
+            "stock_6m": None,
+            "stock_12m": None,
+            "benchmark_1m": None,
+            "benchmark_3m": None,
+            "benchmark_6m": None,
+            "benchmark_12m": None,
+            "relative_1m": None,
+            "relative_3m": None,
+            "relative_6m": None,
+            "relative_12m": None,
+        }
+
+    stock_prices = pd.DataFrame(
+        {
+            "close": aligned_data["stock_close"],
+        }
+    )
+
+    benchmark_prices = pd.DataFrame(
+        {
+            "close": aligned_data["benchmark_close"],
+        }
+    )
+
+    stock_1m = calculate_return(
+        stock_prices,
+        21,
+    )
+
+    stock_3m = calculate_return(
+        stock_prices,
+        63,
+    )
+
+    stock_6m = calculate_return(
+        stock_prices,
+        126,
+    )
+
+    stock_12m = calculate_return(
+        stock_prices,
+        252,
+    )
+
+    benchmark_1m = calculate_return(
+        benchmark_prices,
+        21,
+    )
+
+    benchmark_3m = calculate_return(
+        benchmark_prices,
+        63,
+    )
+
+    benchmark_6m = calculate_return(
+        benchmark_prices,
+        126,
+    )
+
+    benchmark_12m = calculate_return(
+        benchmark_prices,
+        252,
+    )
+
+    relative_1m = None
+    relative_3m = None
+    relative_6m = None
+    relative_12m = None
+
+    if stock_1m is not None and benchmark_1m is not None:
+        relative_1m = stock_1m - benchmark_1m
+
+    if stock_3m is not None and benchmark_3m is not None:
+        relative_3m = stock_3m - benchmark_3m
+
+    if stock_6m is not None and benchmark_6m is not None:
+        relative_6m = stock_6m - benchmark_6m
+
+    if stock_12m is not None and benchmark_12m is not None:
+        relative_12m = stock_12m - benchmark_12m
+
+    rs_line = (
+        aligned_data["stock_close"]
+        / aligned_data["benchmark_close"]
+    )
+
+    rs_trend = "Unavailable"
+
+    if len(rs_line) >= 63:
+        rs_now = float(rs_line.iloc[-1])
+        rs_3_months_ago = float(rs_line.iloc[-63])
+
+        if rs_now > rs_3_months_ago * 1.03:
+            rs_trend = "Rising"
+
+        elif rs_now < rs_3_months_ago * 0.97:
+            rs_trend = "Falling"
+
+        else:
+            rs_trend = "Flat"
+
+    available_relative_returns = [
+        value
+        for value in [
+            relative_1m,
+            relative_3m,
+            relative_6m,
+            relative_12m,
+        ]
+        if value is not None
+    ]
+
+    if len(available_relative_returns) < 2:
+        rs_status = "Insufficient data"
+
+    else:
+        positive_count = sum(
+            value > 0
+            for value in available_relative_returns
+        )
+
+        strong_count = sum(
+            value > 5
+            for value in available_relative_returns
+        )
+
+        weak_count = sum(
+            value < 0
+            for value in available_relative_returns
+        )
+
+        if (
+            positive_count >= 3
+            and strong_count >= 2
+            and rs_trend == "Rising"
+        ):
+            rs_status = "Leader"
+
+        elif (
+            positive_count >= 2
+            and rs_trend in [
+                "Rising",
+                "Flat",
+            ]
+        ):
+            rs_status = "Strong"
+
+        elif weak_count >= 3:
+            rs_status = "Weak"
+
+        else:
+            rs_status = "Neutral"
+
+    return {
+        "status": rs_status,
+        "rs_line": rs_line,
+        "rs_trend": rs_trend,
+        "stock_1m": stock_1m,
+        "stock_3m": stock_3m,
+        "stock_6m": stock_6m,
+        "stock_12m": stock_12m,
+        "benchmark_1m": benchmark_1m,
+        "benchmark_3m": benchmark_3m,
+        "benchmark_6m": benchmark_6m,
+        "benchmark_12m": benchmark_12m,
+        "relative_1m": relative_1m,
+        "relative_3m": relative_3m,
+        "relative_6m": relative_6m,
+        "relative_12m": relative_12m,
+    }
+
+
+def create_relative_strength_chart(
+    rs_line,
+    symbol,
+):
+    """Creates an RS-line chart versus Nifty 50."""
+
+    figure = go.Figure()
+
+    if rs_line is not None and not rs_line.empty:
+        figure.add_trace(
+            go.Scatter(
+                x=rs_line.index,
+                y=rs_line,
+                mode="lines",
+                name="RS Line",
+                line=dict(
+                    color="#2563eb",
+                    width=2,
+                ),
+            )
+        )
+
+    figure.update_layout(
+        title=(
+            f"{symbol} Relative Strength Line "
+            "vs Nifty 50"
+        ),
+        height=350,
+        template="plotly_white",
+        xaxis_title="Date",
+        yaxis_title="Stock Price / Nifty 50",
+        margin=dict(
+            l=10,
+            r=10,
+            t=50,
+            b=10,
+        ),
+    )
+
+    return figure
+
+
+# =============================================================================
+# MULTI-TIMEFRAME ALIGNMENT ENGINE
+# =============================================================================
+
+def trend_points(trend):
+    """Converts a trend classification into alignment points."""
+
+    if trend == "Strong bullish":
+        return 4
+
+    if trend == "Bullish":
+        return 3
+
+    if trend == "Neutral / consolidating":
+        return 1
+
+    if trend == "Bearish":
+        return 0
+
+    return 0
+
+
+def calculate_multitimeframe_alignment(
+    daily_data,
+    weekly_data,
+    monthly_data,
+):
+    """
+    Calculates Daily / Weekly / Monthly trend alignment.
+
+    Maximum score: 10
+    Daily:   maximum 3 points
+    Weekly:  maximum 4 points
+    Monthly: maximum 3 points
+    """
+
+    daily_trend = calculate_overall_trend(
+        daily_data
+    )
+
+    weekly_trend = calculate_overall_trend(
+        weekly_data
+    )
+
+    monthly_trend = calculate_overall_trend(
+        monthly_data
+    )
+
+    if (
+        daily_trend == "Insufficient data"
+        and weekly_trend == "Insufficient data"
+        and monthly_trend == "Insufficient data"
+    ):
+        return {
+            "daily": daily_trend,
+            "weekly": weekly_trend,
+            "monthly": monthly_trend,
+            "score": None,
+            "status": "Insufficient data",
+            "structure": "Insufficient chart history",
+        }
+
+    score = 0
+
+    if daily_trend == "Strong bullish":
+        score += 3
+
+    elif daily_trend == "Bullish":
+        score += 2
+
+    elif daily_trend == "Neutral / consolidating":
+        score += 1
+
+    if weekly_trend == "Strong bullish":
+        score += 4
+
+    elif weekly_trend == "Bullish":
+        score += 3
+
+    elif weekly_trend == "Neutral / consolidating":
+        score += 1
+
+    if monthly_trend == "Strong bullish":
+        score += 3
+
+    elif monthly_trend == "Bullish":
+        score += 2
+
+    elif monthly_trend == "Neutral / consolidating":
+        score += 1
+
+    bullish_trends = sum(
+        trend in [
+            "Strong bullish",
+            "Bullish",
+        ]
+        for trend in [
+            daily_trend,
+            weekly_trend,
+            monthly_trend,
+        ]
+    )
+
+    bearish_trends = sum(
+        trend == "Bearish"
+        for trend in [
+            daily_trend,
+            weekly_trend,
+            monthly_trend,
+        ]
+    )
+
+    if (
+        daily_trend == "Strong bullish"
+        and weekly_trend == "Strong bullish"
+        and monthly_trend in [
+            "Strong bullish",
+            "Bullish",
+        ]
+    ):
+        alignment_status = (
+            "Strong multi-timeframe alignment"
+        )
+
+        market_structure = (
+            "Daily, Weekly and Monthly trends are aligned upward."
+        )
+
+    elif bullish_trends >= 2:
+        alignment_status = (
+            "Bullish multi-timeframe alignment"
+        )
+
+        market_structure = (
+            "Most major chart timeframes are bullish."
+        )
+
+    elif bearish_trends >= 2:
+        alignment_status = (
+            "Bearish multi-timeframe alignment"
+        )
+
+        market_structure = (
+            "Most major chart timeframes are bearish."
+        )
+
+    else:
+        alignment_status = (
+            "Mixed timeframe alignment"
+        )
+
+        market_structure = (
+            "Timeframes disagree; avoid treating this as a high-conviction trend."
+        )
+
+    return {
+        "daily": daily_trend,
+        "weekly": weekly_trend,
+        "monthly": monthly_trend,
+        "score": score,
+        "status": alignment_status,
+        "structure": market_structure,
+    }
+
+
+# =============================================================================
+# TECHNICAL PATTERN FUNCTIONS
+# =============================================================================
+
 def find_pivots(values, pivot_type="high", order=3):
     """Finds local high or low pivot indexes."""
 
@@ -1765,7 +972,7 @@ def find_pivots(values, pivot_type="high", order=3):
     if len(values) < (order * 2) + 1:
         return []
 
-    indexes = []
+    pivot_indexes = []
 
     for index in range(order, len(values) - order):
         window = values[
@@ -1774,40 +981,42 @@ def find_pivots(values, pivot_type="high", order=3):
 
         if pivot_type == "high":
             if values[index] >= np.max(window):
-                indexes.append(index)
+                pivot_indexes.append(index)
+
         else:
             if values[index] <= np.min(window):
-                indexes.append(index)
+                pivot_indexes.append(index)
 
-    return indexes
+    return pivot_indexes
 
 
 def build_pattern_signal(
     pattern,
     status,
-    price_data,
+    data,
     level,
     direction,
     notes,
 ):
-    """Creates a normalized technical pattern signal."""
+    """Creates a standardized technical signal."""
 
-    current_price = float(
-        price_data["close"].iloc[-1]
+    latest_price = float(data["close"].iloc[-1])
+
+    previous_volumes = (
+        data["volume"]
+        .tail(21)
+        .iloc[:-1]
     )
 
     average_volume = float(
-        price_data["volume"]
-        .tail(21)
-        .iloc[:-1]
-        .mean()
+        previous_volumes.mean()
     )
 
     latest_volume = float(
-        price_data["volume"].iloc[-1]
+        data["volume"].iloc[-1]
     )
 
-    volume_difference = (
+    volume_change = (
         latest_volume / max(average_volume, 1) - 1
     ) * 100
 
@@ -1815,48 +1024,38 @@ def build_pattern_signal(
         "Pattern": pattern,
         "Status": status,
         "Direction": direction,
-        "Date": price_data.index[-1],
+        "Date": data.index[-1],
         "Level": float(level),
-        "Current": current_price,
+        "Current": latest_price,
         "Return %": (
-            current_price / float(level) - 1
+            latest_price / float(level) - 1
         ) * 100,
-        "Volume %": volume_difference,
+        "Volume %": volume_change,
         "Notes": notes,
     }
 
 
-def detect_patterns(price_data):
+def detect_patterns(data):
     """
-    Detects rule-based Double Top, Double Bottom, Head & Shoulders,
-    triangles, rectangles and basic reversal-candle candidates.
+    Detects selected rule-based price patterns.
+
+    These patterns are educational signals, not trade recommendations.
     """
 
-    if price_data is None or price_data.empty:
+    if data is None or data.empty:
         return []
 
-    price_data = price_data.dropna().copy()
+    data = data.dropna().copy()
 
-    if len(price_data) < 40:
+    if len(data) < 40:
         return []
 
-    high = price_data["high"].to_numpy(
-        dtype=float
-    )
+    high = data["high"].to_numpy(dtype=float)
+    low = data["low"].to_numpy(dtype=float)
+    close = data["close"].to_numpy(dtype=float)
+    open_price = data["open"].to_numpy(dtype=float)
 
-    low = price_data["low"].to_numpy(
-        dtype=float
-    )
-
-    close = price_data["close"].to_numpy(
-        dtype=float
-    )
-
-    open_price = price_data["open"].to_numpy(
-        dtype=float
-    )
-
-    signals = []
+    results = []
 
     pivot_highs = find_pivots(
         high,
@@ -1872,38 +1071,38 @@ def detect_patterns(price_data):
 
     # DOUBLE TOP
     if len(pivot_highs) >= 2:
-        top_one = pivot_highs[-2]
-        top_two = pivot_highs[-1]
+        first_top = pivot_highs[-2]
+        second_top = pivot_highs[-1]
 
         difference = abs(
-            high[top_one] - high[top_two]
-        ) / max(high[top_one], 1)
+            high[first_top] - high[second_top]
+        ) / max(high[first_top], 1)
 
         if (
-            top_two - top_one >= 8
+            second_top - first_top >= 8
             and difference < 0.045
         ):
             neckline = float(
                 np.min(
-                    low[top_one:top_two + 1]
+                    low[first_top:second_top + 1]
                 )
             )
 
-            pattern_status = (
+            status = (
                 "Confirmed"
                 if close[-1] < neckline * 0.99
                 else "In progress"
             )
 
-            signals.append(
+            results.append(
                 build_pattern_signal(
                     "Double Top",
-                    pattern_status,
-                    price_data,
+                    status,
+                    data,
                     neckline,
                     "Bearish",
                     (
-                        "Two similar peaks. Confirmation needs "
+                        "Two similar peaks. Confirmation requires "
                         "a close below the neckline."
                     ),
                 )
@@ -1911,38 +1110,38 @@ def detect_patterns(price_data):
 
     # DOUBLE BOTTOM
     if len(pivot_lows) >= 2:
-        bottom_one = pivot_lows[-2]
-        bottom_two = pivot_lows[-1]
+        first_bottom = pivot_lows[-2]
+        second_bottom = pivot_lows[-1]
 
         difference = abs(
-            low[bottom_one] - low[bottom_two]
-        ) / max(low[bottom_one], 1)
+            low[first_bottom] - low[second_bottom]
+        ) / max(low[first_bottom], 1)
 
         if (
-            bottom_two - bottom_one >= 8
+            second_bottom - first_bottom >= 8
             and difference < 0.045
         ):
             neckline = float(
                 np.max(
-                    high[bottom_one:bottom_two + 1]
+                    high[first_bottom:second_bottom + 1]
                 )
             )
 
-            pattern_status = (
+            status = (
                 "Confirmed"
                 if close[-1] > neckline * 1.01
                 else "In progress"
             )
 
-            signals.append(
+            results.append(
                 build_pattern_signal(
                     "Double Bottom",
-                    pattern_status,
-                    price_data,
+                    status,
+                    data,
                     neckline,
                     "Bullish",
                     (
-                        "Two similar troughs. Confirmation needs "
+                        "Two similar troughs. Confirmation requires "
                         "a close above the neckline."
                     ),
                 )
@@ -1985,22 +1184,21 @@ def detect_patterns(price_data):
             high[head] > shoulder_average * 1.04
             and shoulder_difference < 0.10
         ):
-            pattern_status = (
+            status = (
                 "Confirmed"
                 if close[-1] < neckline * 0.99
                 else "In progress"
             )
 
-            signals.append(
+            results.append(
                 build_pattern_signal(
                     "Head & Shoulders",
-                    pattern_status,
-                    price_data,
+                    status,
+                    data,
                     neckline,
                     "Bearish",
                     (
-                        "Confirmation needs a close below "
-                        "neckline support."
+                        "Confirmation requires a close below neckline support."
                     ),
                 )
             )
@@ -2042,68 +1240,65 @@ def detect_patterns(price_data):
             low[head] < shoulder_average * 0.96
             and shoulder_difference < 0.10
         ):
-            pattern_status = (
+            status = (
                 "Confirmed"
                 if close[-1] > neckline * 1.01
                 else "In progress"
             )
 
-            signals.append(
+            results.append(
                 build_pattern_signal(
                     "Inverse Head & Shoulders",
-                    pattern_status,
-                    price_data,
+                    status,
+                    data,
                     neckline,
                     "Bullish",
                     (
-                        "Confirmation needs a close above "
-                        "neckline resistance."
+                        "Confirmation requires a close above neckline resistance."
                     ),
                 )
             )
 
     # RECTANGLES AND TRIANGLES
-    formation_window = 30
+    window_size = 30
 
-    if len(price_data) >= formation_window:
-        recent_highs = high[-formation_window:]
-        recent_lows = low[-formation_window:]
+    if len(data) >= window_size:
+        recent_high = high[-window_size:]
+        recent_low = low[-window_size:]
 
-        x_values = np.arange(
-            formation_window
-        )
+        x_axis = np.arange(window_size)
 
         high_slope = (
             np.polyfit(
-                x_values,
-                recent_highs,
+                x_axis,
+                recent_high,
                 1,
             )[0]
-            / max(np.mean(recent_highs), 1)
+            / max(np.mean(recent_high), 1)
         )
 
         low_slope = (
             np.polyfit(
-                x_values,
-                recent_lows,
+                x_axis,
+                recent_low,
                 1,
             )[0]
-            / max(np.mean(recent_lows), 1)
+            / max(np.mean(recent_low), 1)
         )
 
         resistance = float(
-            np.max(recent_highs)
+            np.max(recent_high)
         )
 
         support = float(
-            np.min(recent_lows)
+            np.min(recent_low)
         )
 
-        price_range = (
+        range_size = (
             resistance - support
         ) / max(resistance, 1)
 
-        if price_range < 0.15:
+        if range_size < 0.15:
             pattern_name = None
 
             if (
@@ -2130,36 +1325,36 @@ def detect_patterns(price_data):
             ):
                 pattern_name = "Symmetrical Triangle"
 
-            if pattern_name is not None:
+            if pattern_name:
                 if close[-1] > resistance * 1.01:
-                    pattern_status = "Confirmed"
+                    status = "Confirmed"
                     direction = "Bullish"
-                    breakout_level = resistance
+                    level = resistance
 
                 elif close[-1] < support * 0.99:
-                    pattern_status = "Confirmed"
+                    status = "Confirmed"
                     direction = "Bearish"
-                    breakout_level = support
+                    level = support
 
                 else:
-                    pattern_status = "In progress"
+                    status = "In progress"
                     direction = "Neutral"
 
                     if pattern_name == "Descending Triangle":
-                        breakout_level = support
+                        level = support
                     else:
-                        breakout_level = resistance
+                        level = resistance
 
-                signals.append(
+                results.append(
                     build_pattern_signal(
                         pattern_name,
-                        pattern_status,
-                        price_data,
-                        breakout_level,
+                        status,
+                        data,
+                        level,
                         direction,
                         (
-                            "Confirmation needs a close outside "
-                            "the defined price range."
+                            "Breakout confirmation requires a close outside "
+                            "the pattern range."
                         ),
                     )
                 )
@@ -2170,11 +1365,11 @@ def detect_patterns(price_data):
     latest_high = float(high[-1])
     latest_low = float(low[-1])
 
-    body = abs(
+    candle_body = abs(
         latest_close - latest_open
     )
 
-    full_range = max(
+    candle_range = max(
         latest_high - latest_low,
         0.000001,
     )
@@ -2189,180 +1384,120 @@ def detect_patterns(price_data):
         - max(latest_open, latest_close)
     )
 
-    previous_low = float(
+    recent_low = float(
         np.min(low[-11:-1])
     )
 
-    previous_high = float(
+    recent_high = float(
         np.max(high[-11:-1])
     )
 
     if (
-        lower_shadow / full_range > 0.55
-        and body / full_range < 0.35
-        and latest_close <= previous_low * 1.04
+        lower_shadow / candle_range > 0.55
+        and candle_body / candle_range < 0.35
+        and latest_close <= recent_low * 1.04
     ):
-        signals.append(
+        results.append(
             build_pattern_signal(
                 "Reversal Bottom",
                 "Candidate",
-                price_data,
+                data,
                 latest_low,
                 "Bullish",
                 (
                     "Hammer-like candle near a local low. "
-                    "Wait for next-candle confirmation."
+                    "Wait for confirmation."
                 ),
             )
         )
 
     # REVERSAL TOP
     if (
-        upper_shadow / full_range > 0.55
-        and body / full_range < 0.35
-        and latest_close >= previous_high * 0.96
+        upper_shadow / candle_range > 0.55
+        and candle_body / candle_range < 0.35
+        and latest_close >= recent_high * 0.96
     ):
-        signals.append(
+        results.append(
             build_pattern_signal(
                 "Reversal Top",
                 "Candidate",
-                price_data,
+                data,
                 latest_high,
                 "Bearish",
                 (
                     "Shooting-star-like candle near a local high. "
-                    "Wait for next-candle confirmation."
+                    "Wait for confirmation."
                 ),
             )
         )
 
-    return signals
+    return results
 
 
-def calculate_support_resistance(price_data):
-    """Calculates approximate nearest pivot-based support and resistance."""
+def calculate_support_resistance(data):
+    """Calculates simple pivot-based support and resistance."""
 
-    if len(price_data) < 30:
+    if len(data) < 30:
         return (
-            float(price_data["low"].tail(10).min()),
-            float(price_data["high"].tail(10).max()),
+            float(data["low"].tail(10).min()),
+            float(data["high"].tail(10).max()),
         )
 
     current_price = float(
-        price_data["close"].iloc[-1]
+        data["close"].iloc[-1]
     )
 
     low_pivots = find_pivots(
-        price_data["low"].to_numpy(),
+        data["low"].to_numpy(),
         "low",
         3,
     )
 
     high_pivots = find_pivots(
-        price_data["high"].to_numpy(),
+        data["high"].to_numpy(),
         "high",
         3,
     )
 
-    support_candidates = [
-        float(price_data["low"].iloc[index])
+    supports = [
+        float(data["low"].iloc[index])
         for index in low_pivots
-        if price_data["low"].iloc[index] < current_price
+        if data["low"].iloc[index] < current_price
     ]
 
-    resistance_candidates = [
-        float(price_data["high"].iloc[index])
+    resistances = [
+        float(data["high"].iloc[index])
         for index in high_pivots
-        if price_data["high"].iloc[index] > current_price
+        if data["high"].iloc[index] > current_price
     ]
 
-    if support_candidates:
-        support = max(
-            support_candidates[-8:]
-        )
-    else:
-        support = float(
-            price_data["low"].tail(20).min()
-        )
+    support = (
+        max(supports[-8:])
+        if supports
+        else float(data["low"].tail(20).min())
+    )
 
-    if resistance_candidates:
-        resistance = min(
-            resistance_candidates[-8:]
-        )
-    else:
-        resistance = float(
-            price_data["high"].tail(20).max()
-        )
+    resistance = (
+        min(resistances[-8:])
+        if resistances
+        else float(data["high"].tail(20).max())
+    )
 
     return support, resistance
 
 
-def calculate_overall_trend(price_data):
-    """Calculates a moving-average-based overall trend."""
-
-    if len(price_data) < 55:
-        return "Insufficient data"
-
-    current_price = float(
-        price_data["close"].iloc[-1]
-    )
-
-    moving_average_20 = float(
-        price_data["close"]
-        .rolling(20)
-        .mean()
-        .iloc[-1]
-    )
-
-    moving_average_50 = float(
-        price_data["close"]
-        .rolling(50)
-        .mean()
-        .iloc[-1]
-    )
-
-    if len(price_data) >= 200:
-        moving_average_200 = float(
-            price_data["close"]
-            .rolling(200)
-            .mean()
-            .iloc[-1]
-        )
-
-        if (
-            current_price > moving_average_20
-            > moving_average_50
-            > moving_average_200
-        ):
-            return "Strong bullish"
-
-    if (
-        current_price > moving_average_20
-        and moving_average_20 > moving_average_50
-    ):
-        return "Bullish"
-
-    if (
-        current_price < moving_average_20
-        and moving_average_20 < moving_average_50
-    ):
-        return "Bearish"
-
-    return "Neutral / consolidating"
-
-
 # =============================================================================
-# CHART CREATION
+# CHART FUNCTIONS
 # =============================================================================
 
-def create_stock_chart(
-    price_data,
-    pattern_signals,
-    chart_title,
+def create_candlestick_chart(
+    data,
+    signals,
+    title,
 ):
-    """Creates candlestick, moving-average, volume, and pattern-level chart."""
+    """Creates the price, moving-average and volume chart."""
 
-    chart_data = price_data.tail(260).copy()
+    chart_data = data.tail(260).copy()
 
     figure = make_subplots(
         rows=2,
@@ -2424,26 +1559,26 @@ def create_stock_chart(
         col=1,
     )
 
-    for signal in pattern_signals:
-        line_color = "#16a34a"
+    for signal in signals:
+        signal_color = "#16a34a"
 
         if signal["Direction"] == "Bearish":
-            line_color = "#dc2626"
+            signal_color = "#dc2626"
 
         elif signal["Direction"] == "Neutral":
-            line_color = "#f59e0b"
+            signal_color = "#f59e0b"
 
         figure.add_hline(
             y=signal["Level"],
             line_dash="dot",
-            line_color=line_color,
+            line_color=signal_color,
             annotation_text=signal["Pattern"],
             row=1,
             col=1,
         )
 
     figure.update_layout(
-        title=chart_title,
+        title=title,
         height=620,
         template="plotly_white",
         xaxis_rangeslider_visible=False,
@@ -2460,7 +1595,7 @@ def create_stock_chart(
 
 
 # =============================================================================
-# LOAD UNIVERSE
+# LOAD MARKET UNIVERSE AND BENCHMARK
 # =============================================================================
 
 with st.spinner(
@@ -2468,6 +1603,14 @@ with st.spinner(
 ):
     stock_universe, universe_error = (
         get_nifty_total_market_members()
+    )
+
+with st.spinner(
+    "Loading Nifty 50 benchmark data..."
+):
+    nifty_50_prices = fetch_price_data(
+        NIFTY_50_BENCHMARK,
+        "5y",
     )
 
 
@@ -2487,8 +1630,8 @@ st.markdown(
 st.markdown(
     """
     <div class="title-sub">
-        Technical patterns • Daily / Weekly / Monthly charts •
-        Annual and Quarterly financial evidence • Sector KPI framework
+        Technical patterns • Fundamentals • Relative Strength •
+        Multi-timeframe alignment • Support and Resistance
     </div>
     """,
     unsafe_allow_html=True,
@@ -2499,10 +1642,16 @@ if universe_error:
 
 if stock_universe.empty:
     st.error(
-        "No stock universe is currently available. "
-        "Click Refresh cached data and try again."
+        "No stock universe is available. "
+        "Please refresh the cached data."
     )
     st.stop()
+
+if nifty_50_prices.empty:
+    st.warning(
+        "Nifty 50 benchmark data is currently unavailable. "
+        "Relative-strength calculations will show insufficient data."
+    )
 
 
 # =============================================================================
@@ -2528,7 +1677,7 @@ with st.sidebar:
     )
 
     st.caption(
-        f"Loaded stock universe: {len(stock_universe)} stocks"
+        f"Loaded universe: {len(stock_universe)} stocks"
     )
 
     if st.button("🔄 Refresh cached data"):
@@ -2539,9 +1688,8 @@ with st.sidebar:
 
     st.caption(
         "Price cache: 15 minutes\n\n"
-        "Basic fundamentals cache: 12 hours\n\n"
-        "Financial statements cache: 12 hours\n\n"
-        "Constituents cache: 6 hours"
+        "Fundamental cache: 12 hours\n\n"
+        "Constituent-list cache: 6 hours"
     )
 
 
@@ -2550,125 +1698,117 @@ with st.sidebar:
 # =============================================================================
 
 if dashboard_mode == "Stock research":
-    available_symbols = sorted(
+    symbols = sorted(
         stock_universe["Symbol"].tolist()
     )
 
-    default_index = 0
+    default_symbol_index = 0
 
-    if "RELIANCE" in available_symbols:
-        default_index = available_symbols.index(
+    if "RELIANCE" in symbols:
+        default_symbol_index = symbols.index(
             "RELIANCE"
         )
 
     selected_symbol = st.selectbox(
         "Search a Nifty Total Market stock",
-        available_symbols,
-        index=default_index,
+        symbols,
+        index=default_symbol_index,
     )
 
-    selected_record = stock_universe[
+    selected_stock = stock_universe[
         stock_universe["Symbol"] == selected_symbol
     ].iloc[0]
 
-    selected_ticker = selected_record["Ticker"]
-    company_name = selected_record["Company Name"]
-    industry = selected_record["Industry"]
+    selected_ticker = selected_stock["Ticker"]
+    selected_company = selected_stock["Company Name"]
+    selected_industry = selected_stock["Industry"]
 
     with st.spinner(
-        f"Fetching latest research data for {selected_symbol}..."
+        f"Downloading research data for {selected_symbol}..."
     ):
-        daily_prices = fetch_price_data(
+        stock_prices = fetch_price_data(
             selected_ticker,
             "5y",
         )
 
-        basic_fundamentals = fetch_basic_fundamentals(
+        stock_fundamentals = fetch_fundamentals(
             selected_ticker
         )
 
-        financial_statements = fetch_financial_statements(
-            selected_ticker
-        )
-
-    if daily_prices.empty:
+    if stock_prices.empty:
         st.error(
-            "Price data was not available for this stock. "
-            "Please try again later."
+            "No price data is currently available for this stock."
         )
         st.stop()
 
-    market_cap_crore = (
-        basic_fundamentals.get("marketCap") or 0
-    ) / 10000000
+    daily_prices = stock_prices
 
-    basic_score, basic_rating, basic_strengths, basic_concerns = (
-        calculate_basic_fundamental_score(
-            basic_fundamentals
+    weekly_prices = resample_ohlcv(
+        stock_prices,
+        "Weekly",
+    )
+
+    monthly_prices = resample_ohlcv(
+        stock_prices,
+        "Monthly",
+    )
+
+    relative_strength = calculate_relative_strength(
+        stock_prices,
+        nifty_50_prices,
+    )
+
+    timeframe_alignment = (
+        calculate_multitimeframe_alignment(
+            daily_prices,
+            weekly_prices,
+            monthly_prices,
         )
     )
 
-    annual_data = extract_annual_financial_data(
-        financial_statements,
-        basic_fundamentals,
+    current_price = float(
+        stock_prices["close"].iloc[-1]
     )
 
-    quarterly_data = extract_quarterly_financial_data(
-        financial_statements
+    market_cap = stock_fundamentals.get(
+        "marketCap"
     )
 
-    annual_assessment = assess_annual_fundamentals(
-        annual_data
+    market_cap_crore = (
+        safe_number(market_cap, 0)
+        / 10000000
     )
 
-    quarterly_assessment = assess_quarterly_fundamentals(
-        quarterly_data
-    )
-
-    combined_assessment = calculate_combined_fundamental_status(
-        annual_assessment,
-        quarterly_assessment,
-    )
-
-    transition = determine_fundamental_transition(
-        annual_assessment["rating"],
-        quarterly_assessment["rating"],
-    )
-
-    current_close = float(
-        daily_prices["close"].iloc[-1]
-    )
-
-    metric_col1, metric_col2, metric_col3, metric_col4 = (
+    top_col1, top_col2, top_col3, top_col4 = (
         st.columns(4)
     )
 
-    metric_col1.metric(
+    top_col1.metric(
         "Last Close",
-        f"₹{current_close:,.2f}",
+        format_price(current_price),
     )
 
-    metric_col2.metric(
+    top_col2.metric(
         "Market Cap",
+        format_market_cap(market_cap),
+    )
+
+    top_col3.metric(
+        "Relative Strength",
+        relative_strength["status"],
+    )
+
+    top_col4.metric(
+        "MTF Alignment",
         (
-            f"₹{market_cap_crore:,.0f} Cr"
-            if market_cap_crore > 0
+            f"{timeframe_alignment['score']}/10"
+            if timeframe_alignment["score"] is not None
             else "Not available"
         ),
     )
 
-    metric_col3.metric(
-        "Daily Trend",
-        calculate_overall_trend(daily_prices),
-    )
-
-    metric_col4.metric(
-        "Basic Fundamental Score",
-        f"{basic_score}/9 · {basic_rating}",
-    )
-
     st.caption(
-        f"{company_name} • {industry}"
+        f"{selected_company} • {selected_industry}"
     )
 
     if (
@@ -2676,345 +1816,515 @@ if dashboard_mode == "Stock research":
         and market_cap_crore < minimum_market_cap
     ):
         st.warning(
-            f"{selected_symbol} is below the selected "
+            f"{selected_symbol} is below your "
             f"₹{minimum_market_cap:,.0f} crore market-cap filter."
         )
 
     (
-        daily_tab,
-        weekly_tab,
-        monthly_tab,
+        technical_tab,
+        relative_strength_tab,
+        alignment_tab,
         fundamentals_tab,
     ) = st.tabs(
         [
-            "Daily",
-            "Weekly",
-            "Monthly",
+            "Technical Research",
+            "Relative Strength",
+            "Multi-Timeframe Alignment",
             "Fundamentals",
         ]
     )
 
-    for tab, timeframe in [
-        (daily_tab, "Daily"),
-        (weekly_tab, "Weekly"),
-        (monthly_tab, "Monthly"),
-    ]:
-        with tab:
-            timeframe_prices = resample_ohlcv(
+    # =========================================================================
+    # TECHNICAL RESEARCH TAB
+    # =========================================================================
+
+    with technical_tab:
+        daily_tab, weekly_tab, monthly_tab = st.tabs(
+            [
+                "Daily",
+                "Weekly",
+                "Monthly",
+            ]
+        )
+
+        for tab, timeframe_name, timeframe_data in [
+            (
+                daily_tab,
+                "Daily",
                 daily_prices,
-                timeframe,
-            )
-
-            signals = detect_patterns(
-                timeframe_prices
-            )
-
-            support, resistance = calculate_support_resistance(
-                timeframe_prices
-            )
-
-            trend_metric, support_metric, resistance_metric = (
-                st.columns(3)
-            )
-
-            trend_metric.metric(
-                "Overall Trend",
-                calculate_overall_trend(
-                    timeframe_prices
-                ),
-            )
-
-            support_metric.metric(
-                "Nearest Support",
-                f"₹{support:,.2f}",
-            )
-
-            resistance_metric.metric(
-                "Nearest Resistance",
-                f"₹{resistance:,.2f}",
-            )
-
-            st.subheader(
-                f"{timeframe} Pattern Status"
-            )
-
-            if signals:
-                signals_dataframe = pd.DataFrame(
-                    signals
+            ),
+            (
+                weekly_tab,
+                "Weekly",
+                weekly_prices,
+            ),
+            (
+                monthly_tab,
+                "Monthly",
+                monthly_prices,
+            ),
+        ]:
+            with tab:
+                signals = detect_patterns(
+                    timeframe_data
                 )
 
-                st.dataframe(
-                    signals_dataframe,
-                    hide_index=True,
+                support, resistance = (
+                    calculate_support_resistance(
+                        timeframe_data
+                    )
+                )
+
+                trend_col, support_col, resistance_col = (
+                    st.columns(3)
+                )
+
+                trend_col.metric(
+                    "Overall Trend",
+                    calculate_overall_trend(
+                        timeframe_data
+                    ),
+                )
+
+                support_col.metric(
+                    "Nearest Support",
+                    format_price(support),
+                )
+
+                resistance_col.metric(
+                    "Nearest Resistance",
+                    format_price(resistance),
+                )
+
+                st.subheader(
+                    f"{timeframe_name} Pattern Status"
+                )
+
+                if signals:
+                    signal_dataframe = pd.DataFrame(
+                        signals
+                    )
+
+                    st.dataframe(
+                        signal_dataframe,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            "Date": st.column_config.DatetimeColumn(
+                                "Signal Date",
+                                format="YYYY-MM-DD",
+                            ),
+                            "Level": st.column_config.NumberColumn(
+                                "Breakout / Neckline",
+                                format="₹%.2f",
+                            ),
+                            "Current": st.column_config.NumberColumn(
+                                "Current Price",
+                                format="₹%.2f",
+                            ),
+                            "Return %": st.column_config.NumberColumn(
+                                "Return Since Level",
+                                format="%.2f%%",
+                            ),
+                            "Volume %": st.column_config.NumberColumn(
+                                "Volume vs Average",
+                                format="%.1f%%",
+                            ),
+                        },
+                    )
+
+                else:
+                    st.info(
+                        "No supported active or confirmed pattern "
+                        "is detected on this timeframe."
+                    )
+
+                st.plotly_chart(
+                    create_candlestick_chart(
+                        timeframe_data,
+                        signals,
+                        f"{selected_symbol} — {timeframe_name}",
+                    ),
                     use_container_width=True,
-                    column_config={
-                        "Date": st.column_config.DatetimeColumn(
-                            "Signal Date",
-                            format="YYYY-MM-DD",
-                        ),
-                        "Level": st.column_config.NumberColumn(
-                            "Breakout / Neckline",
-                            format="₹%.2f",
-                        ),
-                        "Current": st.column_config.NumberColumn(
-                            "Current Price",
-                            format="₹%.2f",
-                        ),
-                        "Return %": st.column_config.NumberColumn(
-                            "Return Since Level",
-                            format="%.2f%%",
-                        ),
-                        "Volume %": st.column_config.NumberColumn(
-                            "Volume vs Average",
-                            format="%.1f%%",
-                        ),
-                    },
                 )
 
-            else:
-                st.info(
-                    "No supported active pattern was found "
-                    "on this timeframe."
-                )
+    # =========================================================================
+    # RELATIVE STRENGTH TAB
+    # =========================================================================
 
+    with relative_strength_tab:
+        st.subheader(
+            "Relative Strength vs Nifty 50"
+        )
+
+        st.caption(
+            "Relative Return = Stock Return − Nifty 50 Return. "
+            "Positive relative return means the stock outperformed "
+            "Nifty 50 over the same period."
+        )
+
+        rs_col1, rs_col2, rs_col3 = st.columns(3)
+
+        rs_col1.metric(
+            "RS Status",
+            relative_strength["status"],
+        )
+
+        rs_col2.metric(
+            "RS Line Trend",
+            relative_strength["rs_trend"],
+        )
+
+        rs_col3.metric(
+            "Benchmark",
+            "Nifty 50 (^NSEI)",
+        )
+
+        relative_strength_table = pd.DataFrame(
+            [
+                [
+                    "1 Month",
+                    relative_strength["stock_1m"],
+                    relative_strength["benchmark_1m"],
+                    relative_strength["relative_1m"],
+                ],
+                [
+                    "3 Months",
+                    relative_strength["stock_3m"],
+                    relative_strength["benchmark_3m"],
+                    relative_strength["relative_3m"],
+                ],
+                [
+                    "6 Months",
+                    relative_strength["stock_6m"],
+                    relative_strength["benchmark_6m"],
+                    relative_strength["relative_6m"],
+                ],
+                [
+                    "12 Months",
+                    relative_strength["stock_12m"],
+                    relative_strength["benchmark_12m"],
+                    relative_strength["relative_12m"],
+                ],
+            ],
+            columns=[
+                "Period",
+                "Stock Return %",
+                "Nifty 50 Return %",
+                "Relative Return %",
+            ],
+        )
+
+        st.dataframe(
+            relative_strength_table,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Stock Return %": st.column_config.NumberColumn(
+                    "Stock Return",
+                    format="%.2f%%",
+                ),
+                "Nifty 50 Return %": st.column_config.NumberColumn(
+                    "Nifty 50 Return",
+                    format="%.2f%%",
+                ),
+                "Relative Return %": st.column_config.NumberColumn(
+                    "Relative Return",
+                    format="%.2f%%",
+                ),
+            },
+        )
+
+        if (
+            relative_strength["rs_line"] is not None
+            and not relative_strength["rs_line"].empty
+        ):
             st.plotly_chart(
-                create_stock_chart(
-                    timeframe_prices,
-                    signals,
-                    f"{selected_symbol} — {timeframe}",
+                create_relative_strength_chart(
+                    relative_strength["rs_line"],
+                    selected_symbol,
                 ),
                 use_container_width=True,
             )
+
+        else:
+            st.info(
+                "Insufficient common price history is available to "
+                "calculate the Relative Strength line."
+            )
+
+        st.markdown("### Relative Strength Classification")
+
+        st.markdown(
+            """
+            | RS Status | Meaning |
+            |---|---|
+            | Leader | Outperforming Nifty 50 across most periods with a rising RS line |
+            | Strong | Positive performance versus Nifty 50 on multiple timeframes |
+            | Neutral | Mixed outperformance and underperformance |
+            | Weak | Underperforming Nifty 50 across most timeframes |
+            | Insufficient data | There is not enough aligned historical data |
+            """
+        )
+
+    # =========================================================================
+    # MULTI-TIMEFRAME ALIGNMENT TAB
+    # =========================================================================
+
+    with alignment_tab:
+        st.subheader(
+            "Daily, Weekly and Monthly Trend Alignment"
+        )
+
+        alignment_col1, alignment_col2, alignment_col3 = (
+            st.columns(3)
+        )
+
+        alignment_col1.metric(
+            "Daily Trend",
+            timeframe_alignment["daily"],
+        )
+
+        alignment_col2.metric(
+            "Weekly Trend",
+            timeframe_alignment["weekly"],
+        )
+
+        alignment_col3.metric(
+            "Monthly Trend",
+            timeframe_alignment["monthly"],
+        )
+
+        alignment_score = timeframe_alignment["score"]
+
+        if alignment_score is None:
+            alignment_score_text = "Not available"
+        else:
+            alignment_score_text = (
+                f"{alignment_score}/10"
+            )
+
+        alignment_summary_col1, alignment_summary_col2 = (
+            st.columns(2)
+        )
+
+        alignment_summary_col1.metric(
+            "Alignment Score",
+            alignment_score_text,
+        )
+
+        alignment_summary_col2.metric(
+            "Alignment Status",
+            timeframe_alignment["status"],
+        )
+
+        card_class = "orange-card"
+
+        if (
+            timeframe_alignment["status"]
+            == "Strong multi-timeframe alignment"
+        ):
+            card_class = "green-card"
+
+        elif (
+            timeframe_alignment["status"]
+            == "Bearish multi-timeframe alignment"
+        ):
+            card_class = "red-card"
+
+        st.markdown(
+            f"""
+            <div class="research-card {card_class}">
+                <h4>Market Structure</h4>
+                <p>{timeframe_alignment["structure"]}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            """
+            ### Alignment Score Rules
+
+            | Timeframe | Strong Bullish | Bullish | Neutral | Bearish |
+            |---|---:|---:|---:|---:|
+            | Daily | 3 | 2 | 1 | 0 |
+            | Weekly | 4 | 3 | 1 | 0 |
+            | Monthly | 3 | 2 | 1 | 0 |
+
+            Maximum alignment score: 10.
+            """
+        )
 
     # =========================================================================
     # FUNDAMENTALS TAB
     # =========================================================================
 
     with fundamentals_tab:
-        st.subheader("Basic Fundamental Summary")
+        st.subheader("Basic Fundamental Metrics")
 
-        basic_left, basic_right = st.columns(2)
-
-        with basic_left:
-            st.metric(
-                "Basic Fundamental Score",
-                f"{basic_score}/9",
-            )
-
-            if basic_strengths:
-                st.markdown("#### Positive indicators")
-
-                for strength in basic_strengths:
-                    st.success(f"✅ {strength}")
-
-        with basic_right:
-            if basic_concerns:
-                st.markdown("#### Risk indicators")
-
-                for concern in basic_concerns:
-                    st.warning(f"⚠️ {concern}")
-
-        free_cashflow = basic_fundamentals.get(
+        free_cashflow = stock_fundamentals.get(
             "freeCashflow"
         )
 
-        free_cashflow_display = (
-            f"₹{free_cashflow / 10000000:,.0f} Cr"
-            if isinstance(free_cashflow, (int, float))
-            else "Not available"
+        if isinstance(free_cashflow, (int, float)):
+            free_cashflow_text = (
+                f"₹{free_cashflow / 10000000:,.0f} Cr"
+            )
+        else:
+            free_cashflow_text = "Not available"
+
+        roe_value = safe_number(
+            stock_fundamentals.get(
+                "returnOnEquity"
+            )
         )
 
-        basic_metrics_dataframe = pd.DataFrame(
+        roa_value = safe_number(
+            stock_fundamentals.get(
+                "returnOnAssets"
+            )
+        )
+
+        profit_margin_value = safe_number(
+            stock_fundamentals.get(
+                "profitMargins"
+            )
+        )
+
+        operating_margin_value = safe_number(
+            stock_fundamentals.get(
+                "operatingMargins"
+            )
+        )
+
+        revenue_growth_value = safe_number(
+            stock_fundamentals.get(
+                "revenueGrowth"
+            )
+        )
+
+        earnings_growth_value = safe_number(
+            stock_fundamentals.get(
+                "earningsGrowth"
+            )
+        )
+
+        dividend_yield_value = safe_number(
+            stock_fundamentals.get(
+                "dividendYield"
+            )
+        )
+
+        fundamentals_dataframe = pd.DataFrame(
             [
                 [
                     "Sector",
-                    basic_fundamentals.get(
+                    stock_fundamentals.get(
                         "sector",
                         "Not available",
                     ),
                 ],
                 [
                     "Industry",
-                    basic_fundamentals.get(
+                    stock_fundamentals.get(
                         "industry",
                         "Not available",
                     ),
                 ],
                 [
                     "Trailing P/E",
-                    format_number(
-                        basic_fundamentals.get(
-                            "trailingPE"
-                        )
+                    stock_fundamentals.get(
+                        "trailingPE",
+                        "Not available",
                     ),
                 ],
                 [
                     "Forward P/E",
-                    format_number(
-                        basic_fundamentals.get(
-                            "forwardPE"
-                        )
+                    stock_fundamentals.get(
+                        "forwardPE",
+                        "Not available",
                     ),
                 ],
                 [
                     "Price / Book",
-                    format_number(
-                        basic_fundamentals.get(
-                            "priceToBook"
-                        )
+                    stock_fundamentals.get(
+                        "priceToBook",
+                        "Not available",
                     ),
                 ],
                 [
                     "ROE",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "returnOnEquity"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "returnOnEquity"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{roe_value * 100:.2f}%"
+                        if roe_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "ROA",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "returnOnAssets"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "returnOnAssets"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{roa_value * 100:.2f}%"
+                        if roa_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "Profit Margin",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "profitMargins"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "profitMargins"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{profit_margin_value * 100:.2f}%"
+                        if profit_margin_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "Operating Margin",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "operatingMargins"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "operatingMargins"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{operating_margin_value * 100:.2f}%"
+                        if operating_margin_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "Revenue Growth",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "revenueGrowth"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "revenueGrowth"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{revenue_growth_value * 100:.2f}%"
+                        if revenue_growth_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "Earnings Growth",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "earningsGrowth"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "earningsGrowth"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{earnings_growth_value * 100:.2f}%"
+                        if earnings_growth_value is not None
+                        else "Not available"
                     ),
                 ],
                 [
                     "Debt / Equity",
-                    format_number(
-                        basic_fundamentals.get(
-                            "debtToEquity"
-                        )
+                    stock_fundamentals.get(
+                        "debtToEquity",
+                        "Not available",
                     ),
                 ],
                 [
                     "Current Ratio",
-                    format_number(
-                        basic_fundamentals.get(
-                            "currentRatio"
-                        )
+                    stock_fundamentals.get(
+                        "currentRatio",
+                        "Not available",
                     ),
                 ],
                 [
                     "Free Cash Flow",
-                    free_cashflow_display,
+                    free_cashflow_text,
                 ],
                 [
                     "Dividend Yield",
-                    format_number(
-                        safe_number(
-                            basic_fundamentals.get(
-                                "dividendYield"
-                            )
-                        )
-                        * 100
-                        if safe_number(
-                            basic_fundamentals.get(
-                                "dividendYield"
-                            )
-                        )
-                        is not None
-                        else None,
-                        percentage=True,
+                    (
+                        f"{dividend_yield_value * 100:.2f}%"
+                        if dividend_yield_value is not None
+                        else "Not available"
                     ),
                 ],
             ],
@@ -3024,399 +2334,16 @@ if dashboard_mode == "Stock research":
             ],
         )
 
-        st.markdown("### Basic Fundamental Metrics")
-
         st.dataframe(
-            basic_metrics_dataframe,
-            hide_index=True,
-            use_container_width=True,
-        )
-
-        st.divider()
-
-        # ---------------------------------------------------------------------
-        # FUNDAMENTAL MOMENTUM CARDS
-        # ---------------------------------------------------------------------
-
-        st.subheader(
-            "📈 Annual and Quarterly Fundamental Momentum"
-        )
-
-        annual_col, quarterly_col = st.columns(2)
-
-        with annual_col:
-            st.markdown(
-                f"""
-                <div class="research-card">
-                    <h4>Annual</h4>
-                    <h2>{annual_assessment["rating"]}</h2>
-                    <p>Evidence points: {annual_assessment["data_points"]}</p>
-                    <p>Score: {annual_assessment["score"]}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with quarterly_col:
-            st.markdown(
-                f"""
-                <div class="research-card">
-                    <h4>Quarterly</h4>
-                    <h2>{quarterly_assessment["rating"]}</h2>
-                    <p>Evidence points: {quarterly_assessment["data_points"]}</p>
-                    <p>Score: {quarterly_assessment["score"]}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        combined_col, transition_col = st.columns(2)
-
-        with combined_col:
-            st.markdown(
-                f"""
-                <div class="research-card positive-card">
-                    <h4>Combined</h4>
-                    <h2>{combined_assessment["rating"]}</h2>
-                    <p>
-                        Combined score:
-                        {
-                            combined_assessment["score"]
-                            if combined_assessment["score"] is not None
-                            else "Not available"
-                        }
-                    </p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        with transition_col:
-            st.markdown(
-                f"""
-                <div class="research-card neutral-card">
-                    <h4>Transition</h4>
-                    <h2>{transition}</h2>
-                    <p>Annual quality compared with current quarterly momentum.</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-        # ---------------------------------------------------------------------
-        # ANNUAL EVIDENCE
-        # ---------------------------------------------------------------------
-
-        st.markdown("### Annual Evidence")
-
-        annual_evidence = pd.DataFrame(
-            [
-                [
-                    "Latest annual revenue",
-                    annual_data.get("revenue_latest"),
-                    "Reported",
-                ],
-                [
-                    "Previous annual revenue",
-                    annual_data.get("revenue_previous"),
-                    "Reported",
-                ],
-                [
-                    "Annual revenue growth",
-                    annual_data.get("revenue_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "3-year revenue CAGR",
-                    annual_data.get("revenue_cagr_3y"),
-                    "Calculated",
-                ],
-                [
-                    "Latest annual profit",
-                    annual_data.get("profit_latest"),
-                    "Reported",
-                ],
-                [
-                    "Previous annual profit",
-                    annual_data.get("profit_previous"),
-                    "Reported",
-                ],
-                [
-                    "Annual profit growth",
-                    annual_data.get("profit_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "3-year profit CAGR",
-                    annual_data.get("profit_cagr_3y"),
-                    "Calculated",
-                ],
-                [
-                    "Latest annual EBITDA",
-                    annual_data.get("ebitda_latest"),
-                    "Reported",
-                ],
-                [
-                    "Annual EBITDA growth",
-                    annual_data.get("ebitda_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "ROE",
-                    annual_data.get("roe"),
-                    "Reported / Calculated",
-                ],
-                [
-                    "Operating margin",
-                    annual_data.get("operating_margin"),
-                    "Calculated",
-                ],
-                [
-                    "Operating margin change",
-                    annual_data.get("margin_trend_bps"),
-                    "Calculated",
-                ],
-                [
-                    "Debt / Equity",
-                    annual_data.get("debt_to_equity"),
-                    "Calculated",
-                ],
-                [
-                    "Free cash flow positive",
-                    annual_data.get("free_cash_flow_positive"),
-                    "Reported",
-                ],
-            ],
-            columns=[
-                "Metric",
-                "Value",
-                "Data Type",
-            ],
-        )
-
-        annual_evidence["Value"] = (
-            annual_evidence["Value"]
-            .apply(
-                lambda value: (
-                    "Not available"
-                    if value is None or pd.isna(value)
-                    else value
-                )
-            )
-        )
-
-        st.dataframe(
-            annual_evidence,
-            hide_index=True,
-            use_container_width=True,
-        )
-
-        annual_dates = annual_data.get(
-            "report_dates",
-            [],
-        )
-
-        if annual_dates:
-            st.caption(
-                "Annual reporting periods available: " +
-                " | ".join(annual_dates)
-            )
-
-        if annual_assessment["positives"]:
-            st.markdown("#### Annual positives")
-
-            for positive in annual_assessment["positives"]:
-                st.success(f"✅ {positive}")
-
-        if annual_assessment["concerns"]:
-            st.markdown("#### Annual concerns")
-
-            for concern in annual_assessment["concerns"]:
-                st.warning(f"⚠️ {concern}")
-
-        if annual_assessment["rating"] == "Insufficient data":
-            st.info(
-                "The available annual statement data is incomplete. "
-                "The dashboard will not label the company weak until "
-                "enough real financial evidence is available."
-            )
-
-        # ---------------------------------------------------------------------
-        # QUARTERLY EVIDENCE
-        # ---------------------------------------------------------------------
-
-        st.markdown("### Quarterly Evidence")
-
-        quarterly_evidence = pd.DataFrame(
-            [
-                [
-                    "Latest quarterly revenue",
-                    quarterly_data.get("revenue_latest"),
-                    "Reported",
-                ],
-                [
-                    "Revenue growth YoY",
-                    quarterly_data.get("revenue_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "Revenue growth QoQ",
-                    quarterly_data.get("revenue_qoq"),
-                    "Calculated",
-                ],
-                [
-                    "Latest quarterly profit",
-                    quarterly_data.get("profit_latest"),
-                    "Reported",
-                ],
-                [
-                    "Profit growth YoY",
-                    quarterly_data.get("profit_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "Profit growth QoQ",
-                    quarterly_data.get("profit_qoq"),
-                    "Calculated",
-                ],
-                [
-                    "Latest quarterly EBITDA",
-                    quarterly_data.get("ebitda_latest"),
-                    "Reported",
-                ],
-                [
-                    "EBITDA growth YoY",
-                    quarterly_data.get("ebitda_yoy"),
-                    "Calculated",
-                ],
-                [
-                    "EBITDA growth QoQ",
-                    quarterly_data.get("ebitda_qoq"),
-                    "Calculated",
-                ],
-                [
-                    "Operating margin",
-                    quarterly_data.get("operating_margin"),
-                    "Calculated",
-                ],
-                [
-                    "Operating margin change YoY",
-                    quarterly_data.get(
-                        "margin_change_bps_yoy"
-                    ),
-                    "Calculated",
-                ],
-            ],
-            columns=[
-                "Metric",
-                "Value",
-                "Data Type",
-            ],
-        )
-
-        quarterly_evidence["Value"] = (
-            quarterly_evidence["Value"]
-            .apply(
-                lambda value: (
-                    "Not available"
-                    if value is None or pd.isna(value)
-                    else value
-                )
-            )
-        )
-
-        st.dataframe(
-            quarterly_evidence,
-            hide_index=True,
-            use_container_width=True,
-        )
-
-        quarterly_dates = quarterly_data.get(
-            "report_dates",
-            [],
-        )
-
-        if quarterly_dates:
-            st.caption(
-                "Quarterly reporting periods available: " +
-                " | ".join(quarterly_dates)
-            )
-
-        if quarterly_assessment["positives"]:
-            st.markdown("#### Quarterly positives")
-
-            for positive in quarterly_assessment["positives"]:
-                st.success(f"✅ {positive}")
-
-        if quarterly_assessment["concerns"]:
-            st.markdown("#### Quarterly concerns")
-
-            for concern in quarterly_assessment["concerns"]:
-                st.warning(f"⚠️ {concern}")
-
-        if quarterly_assessment["rating"] == "Insufficient data":
-            st.info(
-                "Quarterly history is incomplete or unavailable from the "
-                "current data source. This is not treated as weak performance."
-            )
-
-        # ---------------------------------------------------------------------
-        # SECTOR KPI FRAMEWORK
-        # ---------------------------------------------------------------------
-
-        st.divider()
-
-        st.subheader("🏭 Sector-Specific KPI Framework")
-
-        selected_kpi_template = st.selectbox(
-            "Select a sector KPI template",
-            sorted(
-                SECTOR_KPI_LIBRARY.keys()
-            ),
-        )
-
-        selected_kpis = SECTOR_KPI_LIBRARY[
-            selected_kpi_template
-        ]
-
-        sector_kpi_dataframe = pd.DataFrame(
-            {
-                "Sector KPI": selected_kpis,
-                "Latest Value": [
-                    "Not captured"
-                ] * len(selected_kpis),
-                "YoY Change": [
-                    "Not captured"
-                ] * len(selected_kpis),
-                "QoQ Change": [
-                    "Not captured"
-                ] * len(selected_kpis),
-                "Type": [
-                    "Reported or Calculated"
-                ] * len(selected_kpis),
-                "Expected Source": [
-                    "NSE filing / company presentation"
-                ] * len(selected_kpis),
-            }
-        )
-
-        st.dataframe(
-            sector_kpi_dataframe,
+            fundamentals_dataframe,
             hide_index=True,
             use_container_width=True,
         )
 
         st.info(
-            "Reported KPIs include order book, ARPU, CASA, VNB, "
-            "TCV, attrition, utilization, pre-sales, GRM and volumes. "
-            "Calculated KPIs include growth rates, margin changes, "
-            "book-to-bill ratio, cash conversion and debt reduction."
-        )
-
-        st.warning(
-            "Banks and NBFCs must be assessed with sector-specific metrics "
-            "such as NIM, GNPA, NNPA, credit cost, CASA, loan growth, "
-            "deposit growth, ROA, ROE, capital adequacy and provision coverage."
+            "This is the basic fundamental layer. The next stage can add "
+            "annual/quarterly earnings acceleration, ownership trends, "
+            "sector strength, risk/reward, and the composite Winner Score."
         )
 
 
@@ -3425,16 +2352,18 @@ if dashboard_mode == "Stock research":
 # =============================================================================
 
 else:
-    st.subheader("Nifty Total Market Pattern Scanner")
-
-    st.caption(
-        "Scan the Nifty Total Market universe by pattern, timeframe, "
-        "overall trend, signal status, and minimum market cap."
+    st.subheader(
+        "Nifty Total Market Pattern Scanner"
     )
 
-    scanner_col1, scanner_col2 = st.columns(2)
+    st.caption(
+        "Filter the Nifty Total Market universe by price pattern, "
+        "timeframe, overall trend, relative strength and multi-timeframe alignment."
+    )
 
-    with scanner_col1:
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+
+    with filter_col1:
         scanner_pattern = st.selectbox(
             "Pattern",
             PATTERN_OPTIONS,
@@ -3450,7 +2379,7 @@ else:
             ],
         )
 
-    with scanner_col2:
+    with filter_col2:
         scanner_trend = st.selectbox(
             "Overall Trend",
             TREND_OPTIONS,
@@ -3458,19 +2387,35 @@ else:
 
         scanner_status = st.selectbox(
             "Pattern Status",
-            PATTERN_STATUS_OPTIONS,
+            [
+                "Any",
+                "Confirmed",
+                "In progress",
+                "Candidate",
+            ],
+        )
+
+    with filter_col3:
+        scanner_rs_status = st.selectbox(
+            "Relative Strength Status",
+            RS_STATUS_OPTIONS,
+        )
+
+        scanner_alignment = st.selectbox(
+            "MTF Alignment",
+            ALIGNMENT_OPTIONS,
         )
 
     st.info(
-        "When Timeframe is Any, the scanner checks Daily, Weekly and "
-        "Monthly charts. A stock can appear multiple times if it matches "
-        "your criteria on more than one chart timeframe."
+        "Timeframe = Any scans Daily, Weekly and Monthly signals. "
+        "Relative Strength compares each stock with Nifty 50. "
+        "MTF Alignment combines Daily, Weekly and Monthly trend status."
     )
 
     st.warning(
-        "A full 750-stock scan can take several minutes on free Streamlit "
-        "Cloud hosting. Any timeframe requires Daily, Weekly and Monthly "
-        "analysis for each stock."
+        "A full 750-stock scan may take several minutes on Streamlit Cloud. "
+        "For faster scans, use one timeframe instead of Any and use "
+        "specific pattern/trend filters."
     )
 
     if st.button(
@@ -3480,28 +2425,27 @@ else:
         results = []
 
         if scanner_timeframe == "Any":
-            selected_timeframes = [
+            timeframes_to_scan = [
                 "Daily",
                 "Weekly",
                 "Monthly",
             ]
         else:
-            selected_timeframes = [
+            timeframes_to_scan = [
                 scanner_timeframe
             ]
 
         progress_bar = st.progress(0)
-        progress_text = st.empty()
+        progress_label = st.empty()
 
-        stock_count = len(stock_universe)
+        total_stocks = len(stock_universe)
 
         for index, record in stock_universe.iterrows():
             symbol = record["Symbol"]
             ticker = record["Ticker"]
 
-            progress_text.caption(
-                f"Scanning {index + 1:,} of {stock_count:,}: "
-                f"{symbol}"
+            progress_label.caption(
+                f"Scanning {index + 1:,} of {total_stocks:,}: {symbol}"
             )
 
             try:
@@ -3513,68 +2457,121 @@ else:
                 if stock_prices.empty:
                     continue
 
-                technical_matches = []
+                daily_data = stock_prices
+                weekly_data = resample_ohlcv(
+                    stock_prices,
+                    "Weekly",
+                )
 
-                for selected_timeframe in selected_timeframes:
-                    timeframe_prices = resample_ohlcv(
-                        stock_prices,
-                        selected_timeframe,
+                monthly_data = resample_ohlcv(
+                    stock_prices,
+                    "Monthly",
+                )
+
+                stock_rs = calculate_relative_strength(
+                    stock_prices,
+                    nifty_50_prices,
+                )
+
+                stock_alignment = (
+                    calculate_multitimeframe_alignment(
+                        daily_data,
+                        weekly_data,
+                        monthly_data,
                     )
+                )
 
-                    if timeframe_prices.empty:
-                        continue
+                if (
+                    scanner_rs_status != "Any"
+                    and stock_rs["status"] != scanner_rs_status
+                ):
+                    continue
 
-                    overall_trend = calculate_overall_trend(
-                        timeframe_prices
+                if (
+                    scanner_alignment != "Any"
+                    and stock_alignment["status"]
+                    != scanner_alignment
+                ):
+                    continue
+
+                matching_signals = []
+
+                timeframe_map = {
+                    "Daily": daily_data,
+                    "Weekly": weekly_data,
+                    "Monthly": monthly_data,
+                }
+
+                for timeframe in timeframes_to_scan:
+                    timeframe_data = timeframe_map[
+                        timeframe
+                    ]
+
+                    timeframe_trend = calculate_overall_trend(
+                        timeframe_data
                     )
 
                     if (
                         scanner_trend != "Any"
-                        and overall_trend != scanner_trend
+                        and timeframe_trend != scanner_trend
                     ):
                         continue
 
                     detected_patterns = detect_patterns(
-                        timeframe_prices
+                        timeframe_data
                     )
 
-                    for pattern_signal in detected_patterns:
+                    for signal in detected_patterns:
                         pattern_matches = (
                             scanner_pattern == "Any"
-                            or pattern_signal["Pattern"]
+                            or signal["Pattern"]
                             == scanner_pattern
                         )
 
                         status_matches = (
                             scanner_status == "Any"
-                            or pattern_signal["Status"]
+                            or signal["Status"]
                             == scanner_status
                         )
 
                         if pattern_matches and status_matches:
-                            technical_matches.append(
+                            matching_signals.append(
                                 {
-                                    "Timeframe": selected_timeframe,
-                                    "Overall Trend": overall_trend,
-                                    **pattern_signal,
+                                    "Timeframe": timeframe,
+                                    "Overall Trend": timeframe_trend,
+                                    "RS Status": stock_rs["status"],
+                                    "RS Trend": stock_rs["rs_trend"],
+                                    "RS 3M %": stock_rs["relative_3m"],
+                                    "RS 6M %": stock_rs["relative_6m"],
+                                    "MTF Score": stock_alignment[
+                                        "score"
+                                    ],
+                                    "MTF Alignment": stock_alignment[
+                                        "status"
+                                    ],
+                                    **signal,
                                 }
                             )
 
-                if technical_matches:
-                    scanner_fundamentals = fetch_basic_fundamentals(
+                if matching_signals:
+                    stock_fundamentals = fetch_fundamentals(
                         ticker
                     )
 
-                    scanner_market_cap = (
-                        scanner_fundamentals.get(
-                            "marketCap"
-                        ) or 0
-                    ) / 10000000
+                    market_cap = (
+                        safe_number(
+                            stock_fundamentals.get(
+                                "marketCap"
+                            ),
+                            0,
+                        )
+                        / 10000000
+                    )
 
-                    if scanner_market_cap < minimum_market_cap:
+                    if market_cap < minimum_market_cap:
                         continue
 
-                    for match in technical_matches:
+                    for signal in matching_signals:
                         results.append(
                             {
                                 "Stock": symbol,
@@ -3585,10 +2582,10 @@ else:
                                     "Industry"
                                 ],
                                 "Market Cap (Cr)": round(
-                                    scanner_market_cap,
+                                    market_cap,
                                     0,
                                 ),
-                                **match,
+                                **signal,
                             }
                         )
 
@@ -3597,20 +2594,20 @@ else:
 
             progress_bar.progress(
                 min(
-                    (index + 1) / stock_count,
+                    (index + 1) / total_stocks,
                     1.0,
                 )
             )
 
         progress_bar.empty()
-        progress_text.empty()
+        progress_label.empty()
 
         st.subheader(
             f"Matching Signals: {len(results)}"
         )
 
         if results:
-            result_dataframe = pd.DataFrame(results)
+            results_dataframe = pd.DataFrame(results)
 
             signal_priority = {
                 "Confirmed": 1,
@@ -3618,68 +2615,78 @@ else:
                 "Candidate": 3,
             }
 
-            result_dataframe["Priority"] = (
-                result_dataframe["Status"]
+            results_dataframe["Status Priority"] = (
+                results_dataframe["Status"]
                 .map(signal_priority)
                 .fillna(99)
             )
 
-            result_dataframe = (
-                result_dataframe
+            results_dataframe = (
+                results_dataframe
                 .sort_values(
                     by=[
-                        "Priority",
+                        "Status Priority",
+                        "MTF Score",
+                        "RS 6M %",
                         "Return %",
                     ],
                     ascending=[
                         True,
                         False,
+                        False,
+                        False,
                     ],
                 )
-                .drop(columns=["Priority"])
+                .drop(
+                    columns=[
+                        "Status Priority"
+                    ]
+                )
             )
 
-            total_col, confirmed_col, trend_col, bullish_col = (
+            result_col1, result_col2, result_col3, result_col4 = (
                 st.columns(4)
             )
 
-            total_col.metric(
+            result_col1.metric(
                 "Total Matches",
-                len(result_dataframe),
+                len(results_dataframe),
             )
 
-            confirmed_col.metric(
-                "Confirmed Signals",
+            result_col2.metric(
+                "Confirmed",
                 int(
                     (
-                        result_dataframe["Status"]
+                        results_dataframe["Status"]
                         == "Confirmed"
                     ).sum()
                 ),
             )
 
-            trend_col.metric(
-                "Strong Bullish",
+            result_col3.metric(
+                "RS Leaders",
                 int(
                     (
-                        result_dataframe["Overall Trend"]
-                        == "Strong bullish"
+                        results_dataframe["RS Status"]
+                        == "Leader"
                     ).sum()
                 ),
             )
 
-            bullish_col.metric(
-                "Bullish Direction",
+            result_col4.metric(
+                "Strong MTF Alignment",
                 int(
                     (
-                        result_dataframe["Direction"]
-                        == "Bullish"
+                        results_dataframe[
+                            "MTF Alignment"
+                        ]
+                        == "Strong multi-timeframe alignment"
                     ).sum()
                 ),
             )
 
             st.dataframe(
-                result_dataframe,
+                results_dataframe,
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -3703,6 +2710,18 @@ else:
                         "Volume vs Average",
                         format="%.1f%%",
                     ),
+                    "RS 3M %": st.column_config.NumberColumn(
+                        "RS vs Nifty 50: 3M",
+                        format="%.2f%%",
+                    ),
+                    "RS 6M %": st.column_config.NumberColumn(
+                        "RS vs Nifty 50: 6M",
+                        format="%.2f%%",
+                    ),
+                    "MTF Score": st.column_config.NumberColumn(
+                        "MTF Score",
+                        format="%.0f/10",
+                    ),
                     "Market Cap (Cr)": st.column_config.NumberColumn(
                         "Market Cap",
                         format="₹%d Cr",
@@ -3710,21 +2729,21 @@ else:
                 },
             )
 
-            csv_export = result_dataframe.to_csv(
+            csv_data = results_dataframe.to_csv(
                 index=False
             ).encode("utf-8")
 
             st.download_button(
-                "⬇️ Download Scan Results as CSV",
-                data=csv_export,
-                file_name="nifty_total_market_pattern_scan.csv",
+                "⬇️ Download Results as CSV",
+                data=csv_data,
+                file_name="nifty_total_market_rs_pattern_scan.csv",
                 mime="text/csv",
             )
 
         else:
             st.info(
-                "No stocks matched the selected Pattern, Timeframe, "
-                "Trend, Status and Market Cap filters."
+                "No stocks matched all selected filters. "
+                "Try selecting Any for one or more filters."
             )
 
 
@@ -3736,10 +2755,8 @@ st.divider()
 
 st.caption(
     "Data sources: Nifty Indices constituent list and Yahoo Finance. "
-    "Financial statement availability varies by stock. Sector-specific "
-    "KPIs require NSE filings, company quarterly presentations, annual "
-    "reports, or a dedicated Indian-market data provider. Technical "
-    "patterns are rule-based and may produce false positives. "
-    "This dashboard is for research and educational purposes only, "
-    "not investment advice."
+    "Relative Strength compares stocks to Nifty 50 (^NSEI). "
+    "Technical patterns and alignment ratings are rule-based research aids. "
+    "Verify data independently before making any investment decision. "
+    "This dashboard is for research and education only, not investment advice."
 )

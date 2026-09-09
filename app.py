@@ -13,7 +13,7 @@ from plotly.subplots import make_subplots
 # =============================================================================
 
 st.set_page_config(
-    page_title="Nifty Total Market Winner Dashboard",
+    page_title="Nifty Total Market Command Center",
     page_icon="🏆",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -21,7 +21,7 @@ st.set_page_config(
 
 
 # =============================================================================
-# STYLE
+# STYLING
 # =============================================================================
 
 st.markdown(
@@ -41,10 +41,10 @@ st.markdown(
         }
 
         .research-card {
-            background-color: #ffffff;
             border: 1px solid #e5e7eb;
             border-radius: 12px;
             padding: 16px;
+            background: #ffffff;
             margin-bottom: 12px;
         }
 
@@ -62,6 +62,11 @@ st.markdown(
 
         .red-card {
             border-left: 6px solid #dc2626;
+        }
+
+        .small-note {
+            color: #6b7280;
+            font-size: 0.9rem;
         }
     </style>
     """,
@@ -159,7 +164,7 @@ WINNER_CATEGORY_OPTIONS = [
 # =============================================================================
 
 def safe_number(value, default=None):
-    """Converts values safely to float."""
+    """Safely converts a value to float."""
 
     try:
         if value is None:
@@ -175,7 +180,7 @@ def safe_number(value, default=None):
 
 
 def format_price(value):
-    """Formats INR price values."""
+    """Formats an INR value safely."""
 
     value = safe_number(value)
 
@@ -186,7 +191,7 @@ def format_price(value):
 
 
 def format_percent(value):
-    """Formats signed percentage values."""
+    """Formats a signed percentage safely."""
 
     value = safe_number(value)
 
@@ -197,7 +202,7 @@ def format_percent(value):
 
 
 def format_market_cap(value):
-    """Formats a market capitalization value into crore rupees."""
+    """Formats market cap to crore rupees."""
 
     value = safe_number(value)
 
@@ -207,26 +212,21 @@ def format_market_cap(value):
     return f"₹{value / 10000000:,.0f} Cr"
 
 
-def calculate_percent_change(current, previous):
-    """Calculates percent change safely."""
+def get_status_priority(status):
+    """Gives confirmed patterns the highest sort priority."""
 
-    current = safe_number(current)
-    previous = safe_number(previous)
+    priorities = {
+        "Confirmed": 1,
+        "In progress": 2,
+        "Candidate": 3,
+        "No Pattern": 4,
+    }
 
-    if current is None or previous is None:
-        return None
-
-    if previous == 0:
-        return None
-
-    return (
-        (current - previous)
-        / abs(previous)
-    ) * 100
+    return priorities.get(status, 99)
 
 
 # =============================================================================
-# NIFTY TOTAL MARKET STOCK UNIVERSE
+# NIFTY TOTAL MARKET UNIVERSE
 # =============================================================================
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -234,7 +234,7 @@ def get_nifty_total_market_members():
     """
     Loads current Nifty Total Market constituents.
 
-    Uses a fallback list if the external CSV cannot be retrieved.
+    Uses a fallback list if the official CSV is unavailable.
     """
 
     headers = {
@@ -267,7 +267,7 @@ def get_nifty_total_market_members():
 
         if "Symbol" not in members.columns:
             raise ValueError(
-                "Nifty constituent CSV does not contain Symbol."
+                "Constituent CSV does not contain Symbol."
             )
 
         if "Series" in members.columns:
@@ -312,7 +312,7 @@ def get_nifty_total_market_members():
 
         if len(members) < 100:
             raise ValueError(
-                "Received too few valid constituents."
+                "Too few Nifty Total Market constituents loaded."
             )
 
         return members, None
@@ -331,8 +331,8 @@ def get_nifty_total_market_members():
         )
 
         warning = (
-            "Could not load the live Nifty Total Market constituent file. "
-            f"Using fallback stocks. Reason: {type(error).__name__}: {error}"
+            "Live Nifty Total Market constituent data could not be loaded. "
+            f"Using fallback universe. Reason: {type(error).__name__}: {error}"
         )
 
         return fallback, warning
@@ -344,7 +344,7 @@ def get_nifty_total_market_members():
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_price_data(ticker, period="5y"):
-    """Fetches OHLCV data from Yahoo Finance."""
+    """Fetches OHLCV price history from Yahoo Finance."""
 
     try:
         ticker_object = yf.Ticker(ticker)
@@ -357,7 +357,9 @@ def fetch_price_data(ticker, period="5y"):
         if data is None or data.empty:
             return pd.DataFrame()
 
-        data = data.rename(columns=str.lower)
+        data = data.rename(
+            columns=str.lower
+        )
 
         required_columns = [
             "open",
@@ -376,9 +378,7 @@ def fetch_price_data(ticker, period="5y"):
         )
 
         if getattr(data.index, "tz", None) is not None:
-            data.index = (
-                data.index.tz_localize(None)
-            )
+            data.index = data.index.tz_localize(None)
 
         return data
 
@@ -388,9 +388,9 @@ def fetch_price_data(ticker, period="5y"):
 
 @st.cache_data(ttl=43200, show_spinner=False)
 def fetch_fundamentals(ticker):
-    """Fetches available basic company fundamental data."""
+    """Fetches available Yahoo Finance fundamental data."""
 
-    fundamental_fields = [
+    fields = [
         "marketCap",
         "sector",
         "industry",
@@ -414,12 +414,11 @@ def fetch_fundamentals(ticker):
 
     try:
         ticker_object = yf.Ticker(ticker)
-
-        company_info = ticker_object.get_info()
+        data = ticker_object.get_info()
 
         return {
-            field: company_info.get(field)
-            for field in fundamental_fields
+            field: data.get(field)
+            for field in fields
         }
 
     except Exception:
@@ -431,7 +430,7 @@ def fetch_fundamentals(ticker):
 # =============================================================================
 
 def resample_ohlcv(data, timeframe):
-    """Resamples daily OHLCV data to Weekly or Monthly candles."""
+    """Resamples daily data into Weekly or Monthly OHLCV candles."""
 
     if data.empty:
         return data
@@ -464,16 +463,16 @@ def resample_ohlcv(data, timeframe):
 
 def calculate_overall_trend(data):
     """
-    Returns the overall trend from moving-average alignment.
+    Classifies overall moving-average trend.
 
     Strong bullish:
-    Price > MA20 > MA50 > MA200
+    Close > MA20 > MA50 > MA200.
 
     Bullish:
-    Price > MA20 > MA50
+    Close > MA20 > MA50.
 
     Bearish:
-    Price < MA20 < MA50
+    Close < MA20 < MA50.
     """
 
     if data is None or len(data) < 55:
@@ -522,11 +521,7 @@ def calculate_multitimeframe_alignment(
     weekly_data,
     monthly_data,
 ):
-    """
-    Scores Daily, Weekly and Monthly trend alignment.
-
-    Maximum score: 10.
-    """
+    """Scores Daily, Weekly and Monthly alignment out of 10."""
 
     daily_trend = calculate_overall_trend(
         daily_data
@@ -551,7 +546,7 @@ def calculate_multitimeframe_alignment(
             "monthly": monthly_trend,
             "score": None,
             "status": "Insufficient data",
-            "structure": "Insufficient price history.",
+            "structure": "Insufficient chart history.",
         }
 
     daily_points = {
@@ -585,11 +580,11 @@ def calculate_multitimeframe_alignment(
     )
 
     bullish_count = sum(
-        trend in [
+        value in [
             "Strong bullish",
             "Bullish",
         ]
-        for trend in [
+        for value in [
             daily_trend,
             weekly_trend,
             monthly_trend,
@@ -597,8 +592,8 @@ def calculate_multitimeframe_alignment(
     )
 
     bearish_count = sum(
-        trend == "Bearish"
-        for trend in [
+        value == "Bearish"
+        for value in [
             daily_trend,
             weekly_trend,
             monthly_trend,
@@ -623,21 +618,21 @@ def calculate_multitimeframe_alignment(
         status = "Bullish multi-timeframe alignment"
 
         structure = (
-            "Most major chart timeframes are bullish."
+            "Most chart timeframes are bullish."
         )
 
     elif bearish_count >= 2:
         status = "Bearish multi-timeframe alignment"
 
         structure = (
-            "Most major chart timeframes are bearish."
+            "Most chart timeframes are bearish."
         )
 
     else:
         status = "Mixed timeframe alignment"
 
         structure = (
-            "Daily, Weekly and Monthly chart structures are mixed."
+            "Timeframes are mixed; trend conviction is lower."
         )
 
     return {
@@ -655,7 +650,7 @@ def calculate_multitimeframe_alignment(
 # =============================================================================
 
 def calculate_period_return(data, trading_days):
-    """Calculates return over an approximate number of trading days."""
+    """Calculates return over selected approximate trading-day periods."""
 
     if data is None or data.empty:
         return None
@@ -667,23 +662,20 @@ def calculate_period_return(data, trading_days):
         data["close"].iloc[-1]
     )
 
-    previous_close = float(
+    old_close = float(
         data["close"].iloc[-trading_days - 1]
     )
 
-    if previous_close == 0:
+    if old_close == 0:
         return None
 
     return (
-        current_close / previous_close - 1
+        current_close / old_close - 1
     ) * 100
 
 
-def align_stock_and_benchmark(
-    stock_data,
-    benchmark_data,
-):
-    """Aligns stock and benchmark price data on common dates."""
+def align_stock_benchmark(stock_data, benchmark_data):
+    """Aligns stock and benchmark prices to common dates."""
 
     if stock_data.empty or benchmark_data.empty:
         return pd.DataFrame()
@@ -717,12 +709,12 @@ def calculate_relative_strength(
     benchmark_data,
 ):
     """
-    Calculates stock performance relative to Nifty 50.
+    Calculates relative return and RS-line condition vs Nifty 50.
 
-    Relative Return = Stock Return - Nifty 50 Return.
+    Relative Return = Stock Return - Benchmark Return.
     """
 
-    aligned_data = align_stock_and_benchmark(
+    aligned = align_stock_benchmark(
         stock_data,
         benchmark_data,
     )
@@ -745,18 +737,18 @@ def calculate_relative_strength(
         "relative_12m": None,
     }
 
-    if len(aligned_data) < 30:
+    if len(aligned) < 30:
         return empty_result
 
     stock_prices = pd.DataFrame(
         {
-            "close": aligned_data["stock_close"],
+            "close": aligned["stock_close"],
         }
     )
 
     benchmark_prices = pd.DataFrame(
         {
-            "close": aligned_data["benchmark_close"],
+            "close": aligned["benchmark_close"],
         }
     )
 
@@ -829,31 +821,31 @@ def calculate_relative_strength(
     )
 
     rs_line = (
-        aligned_data["stock_close"]
-        / aligned_data["benchmark_close"]
+        aligned["stock_close"]
+        / aligned["benchmark_close"]
     )
 
     rs_trend = "Unavailable"
 
     if len(rs_line) >= 63:
-        latest_rs = float(
+        latest_value = float(
             rs_line.iloc[-1]
         )
 
-        old_rs = float(
+        old_value = float(
             rs_line.iloc[-63]
         )
 
-        if latest_rs > old_rs * 1.03:
+        if latest_value > old_value * 1.03:
             rs_trend = "Rising"
 
-        elif latest_rs < old_rs * 0.97:
+        elif latest_value < old_value * 0.97:
             rs_trend = "Falling"
 
         else:
             rs_trend = "Flat"
 
-    relative_returns = [
+    available_returns = [
         value
         for value in [
             relative_1m,
@@ -864,23 +856,23 @@ def calculate_relative_strength(
         if value is not None
     ]
 
-    if len(relative_returns) < 2:
+    if len(available_returns) < 2:
         rs_status = "Insufficient data"
 
     else:
         positive_count = sum(
             value > 0
-            for value in relative_returns
+            for value in available_returns
         )
 
         strong_count = sum(
             value > 5
-            for value in relative_returns
+            for value in available_returns
         )
 
         negative_count = sum(
             value < 0
-            for value in relative_returns
+            for value in available_returns
         )
 
         if (
@@ -925,11 +917,11 @@ def calculate_relative_strength(
 
 
 # =============================================================================
-# TECHNICAL PATTERN DETECTION
+# PATTERN DETECTION
 # =============================================================================
 
 def find_pivots(values, pivot_type="high", order=3):
-    """Finds local price pivots."""
+    """Finds local high and local low pivot points."""
 
     values = np.asarray(
         values,
@@ -939,7 +931,7 @@ def find_pivots(values, pivot_type="high", order=3):
     if len(values) < (order * 2) + 1:
         return []
 
-    pivot_indexes = []
+    output = []
 
     for index in range(order, len(values) - order):
         window = values[
@@ -948,12 +940,13 @@ def find_pivots(values, pivot_type="high", order=3):
 
         if pivot_type == "high":
             if values[index] >= np.max(window):
-                pivot_indexes.append(index)
+                output.append(index)
+
         else:
             if values[index] <= np.min(window):
-                pivot_indexes.append(index)
+                output.append(index)
 
-    return pivot_indexes
+    return output
 
 
 def build_pattern_signal(
@@ -965,13 +958,13 @@ def build_pattern_signal(
     notes,
     pattern_height=None,
 ):
-    """Creates a standardised technical pattern signal."""
+    """Creates one standard technical signal row."""
 
-    latest_close = float(
+    current_price = float(
         data["close"].iloc[-1]
     )
 
-    average_volume = float(
+    volume_average = float(
         data["volume"]
         .tail(21)
         .iloc[:-1]
@@ -983,7 +976,7 @@ def build_pattern_signal(
     )
 
     volume_change = (
-        latest_volume / max(average_volume, 1) - 1
+        latest_volume / max(volume_average, 1) - 1
     ) * 100
 
     return {
@@ -992,9 +985,9 @@ def build_pattern_signal(
         "Direction": direction,
         "Date": data.index[-1],
         "Level": float(level),
-        "Current": latest_close,
+        "Current": current_price,
         "Return %": (
-            latest_close / float(level) - 1
+            current_price / float(level) - 1
         ) * 100,
         "Volume %": volume_change,
         "Pattern Height": pattern_height,
@@ -1004,9 +997,10 @@ def build_pattern_signal(
 
 def detect_patterns(data):
     """
-    Detects current technical pattern candidates.
+    Detects basic active technical structures.
 
-    Pattern Height is included where possible for measured-move targets.
+    These are rule-based research signals and do not replace
+    discretionary chart review.
     """
 
     if data is None or data.empty:
@@ -1033,7 +1027,7 @@ def detect_patterns(data):
         dtype=float
     )
 
-    detected = []
+    signals = []
 
     pivot_highs = find_pivots(
         high,
@@ -1049,29 +1043,31 @@ def detect_patterns(data):
 
     # DOUBLE TOP
     if len(pivot_highs) >= 2:
-        first_top = pivot_highs[-2]
-        second_top = pivot_highs[-1]
+        top_one = pivot_highs[-2]
+        top_two = pivot_highs[-1]
 
-        top_difference = abs(
-            high[first_top] - high[second_top]
-        ) / max(high[first_top], 1)
+        difference = abs(
+            high[top_one] - high[top_two]
+        ) / max(high[top_one], 1)
 
         if (
-            second_top - first_top >= 8
-            and top_difference < 0.045
+            top_two - top_one >= 8
+            and difference < 0.045
         ):
             neckline = float(
                 np.min(
-                    low[first_top:second_top + 1]
+                    low[top_one:top_two + 1]
                 )
             )
 
             peak = max(
-                high[first_top],
-                high[second_top],
+                high[top_one],
+                high[top_two],
             )
 
-            height = peak - neckline
+            pattern_height = (
+                peak - neckline
+            )
 
             status = (
                 "Confirmed"
@@ -1079,7 +1075,7 @@ def detect_patterns(data):
                 else "In progress"
             )
 
-            detected.append(
+            signals.append(
                 build_pattern_signal(
                     "Double Top",
                     status,
@@ -1090,35 +1086,37 @@ def detect_patterns(data):
                         "Two similar highs. Confirmation requires "
                         "a close below neckline support."
                     ),
-                    pattern_height=height,
+                    pattern_height,
                 )
             )
 
     # DOUBLE BOTTOM
     if len(pivot_lows) >= 2:
-        first_bottom = pivot_lows[-2]
-        second_bottom = pivot_lows[-1]
+        bottom_one = pivot_lows[-2]
+        bottom_two = pivot_lows[-1]
 
-        bottom_difference = abs(
-            low[first_bottom] - low[second_bottom]
-        ) / max(low[first_bottom], 1)
+        difference = abs(
+            low[bottom_one] - low[bottom_two]
+        ) / max(low[bottom_one], 1)
 
         if (
-            second_bottom - first_bottom >= 8
-            and bottom_difference < 0.045
+            bottom_two - bottom_one >= 8
+            and difference < 0.045
         ):
             neckline = float(
                 np.max(
-                    high[first_bottom:second_bottom + 1]
+                    high[bottom_one:bottom_two + 1]
                 )
             )
 
             base = min(
-                low[first_bottom],
-                low[second_bottom],
+                low[bottom_one],
+                low[bottom_two],
             )
 
-            height = neckline - base
+            pattern_height = (
+                neckline - base
+            )
 
             status = (
                 "Confirmed"
@@ -1126,7 +1124,7 @@ def detect_patterns(data):
                 else "In progress"
             )
 
-            detected.append(
+            signals.append(
                 build_pattern_signal(
                     "Double Bottom",
                     status,
@@ -1137,7 +1135,7 @@ def detect_patterns(data):
                         "Two similar lows. Confirmation requires "
                         "a close above neckline resistance."
                     ),
-                    pattern_height=height,
+                    pattern_height,
                 )
             )
 
@@ -1188,7 +1186,7 @@ def detect_patterns(data):
                 else "In progress"
             )
 
-            detected.append(
+            signals.append(
                 build_pattern_signal(
                     "Head & Shoulders",
                     status,
@@ -1196,10 +1194,9 @@ def detect_patterns(data):
                     neckline,
                     "Bearish",
                     (
-                        "Confirmation requires a close below "
-                        "neckline support."
+                        "Confirmation requires a close below neckline support."
                     ),
-                    pattern_height=pattern_height,
+                    pattern_height,
                 )
             )
 
@@ -1250,7 +1247,7 @@ def detect_patterns(data):
                 else "In progress"
             )
 
-            detected.append(
+            signals.append(
                 build_pattern_signal(
                     "Inverse Head & Shoulders",
                     status,
@@ -1258,22 +1255,21 @@ def detect_patterns(data):
                     neckline,
                     "Bullish",
                     (
-                        "Confirmation requires a close above "
-                        "neckline resistance."
+                        "Confirmation requires a close above neckline resistance."
                     ),
-                    pattern_height=pattern_height,
+                    pattern_height,
                 )
             )
 
-    # RECTANGLE AND TRIANGLE PATTERNS
-    pattern_window = 30
+    # RECTANGLES AND TRIANGLES
+    window_size = 30
 
-    if len(data) >= pattern_window:
-        recent_highs = high[-pattern_window:]
-        recent_lows = low[-pattern_window:]
+    if len(data) >= window_size:
+        recent_highs = high[-window_size:]
+        recent_lows = low[-window_size:]
 
         x_values = np.arange(
-            pattern_window
+            window_size
         )
 
         high_slope = (
@@ -1306,12 +1302,12 @@ def detect_patterns(data):
             resistance - support
         )
 
-        range_percent = (
+        channel_size = (
             pattern_height
             / max(resistance, 1)
         )
 
-        if range_percent < 0.15:
+        if channel_size < 0.15:
             pattern_name = None
 
             if (
@@ -1358,7 +1354,7 @@ def detect_patterns(data):
                     else:
                         level = resistance
 
-                detected.append(
+                signals.append(
                     build_pattern_signal(
                         pattern_name,
                         status,
@@ -1367,13 +1363,13 @@ def detect_patterns(data):
                         direction,
                         (
                             "Confirmation requires a close outside "
-                            "the pattern range."
+                            "the current pattern range."
                         ),
-                        pattern_height=pattern_height,
+                        pattern_height,
                     )
                 )
 
-    # REVERSAL BOTTOM
+    # REVERSAL BOTTOM / TOP
     latest_open = float(
         open_price[-1]
     )
@@ -1409,20 +1405,20 @@ def detect_patterns(data):
         - max(latest_open, latest_close)
     )
 
-    previous_low = float(
+    prior_low = float(
         np.min(low[-11:-1])
     )
 
-    previous_high = float(
+    prior_high = float(
         np.max(high[-11:-1])
     )
 
     if (
         lower_shadow / candle_range > 0.55
         and candle_body / candle_range < 0.35
-        and latest_close <= previous_low * 1.04
+        and latest_close <= prior_low * 1.04
     ):
-        detected.append(
+        signals.append(
             build_pattern_signal(
                 "Reversal Bottom",
                 "Candidate",
@@ -1430,20 +1426,19 @@ def detect_patterns(data):
                 latest_low,
                 "Bullish",
                 (
-                    "Hammer-like candle near local low. "
-                    "Wait for price confirmation."
+                    "Hammer-like candle near a local low. "
+                    "Wait for confirmation."
                 ),
-                pattern_height=None,
+                None,
             )
         )
 
-    # REVERSAL TOP
     if (
         upper_shadow / candle_range > 0.55
         and candle_body / candle_range < 0.35
-        and latest_close >= previous_high * 0.96
+        and latest_close >= prior_high * 0.96
     ):
-        detected.append(
+        signals.append(
             build_pattern_signal(
                 "Reversal Top",
                 "Candidate",
@@ -1451,33 +1446,31 @@ def detect_patterns(data):
                 latest_high,
                 "Bearish",
                 (
-                    "Shooting-star-like candle near local high. "
-                    "Wait for price confirmation."
+                    "Shooting-star-like candle near a local high. "
+                    "Wait for confirmation."
                 ),
-                pattern_height=None,
+                None,
             )
         )
 
-    return detected
+    return signals
 
 
 # =============================================================================
-# SUPPORT, RESISTANCE, ATR AND RISK ENGINE
+# SUPPORT, RESISTANCE, ATR AND TRADE-PLAN ENGINE
 # =============================================================================
 
 def calculate_support_resistance(data):
     """Calculates pivot-based nearby support and resistance."""
 
+    if data is None or data.empty:
+        return None, None
+
     if len(data) < 30:
-        support = float(
-            data["low"].tail(10).min()
+        return (
+            float(data["low"].tail(10).min()),
+            float(data["high"].tail(10).max()),
         )
-
-        resistance = float(
-            data["high"].tail(10).max()
-        )
-
-        return support, resistance
 
     current_price = float(
         data["close"].iloc[-1]
@@ -1523,11 +1516,7 @@ def calculate_support_resistance(data):
 
 
 def calculate_atr(data, period=14):
-    """
-    Calculates Average True Range.
-
-    ATR is a volatility measure, not a directional indicator.
-    """
+    """Calculates 14-period Average True Range."""
 
     if data is None or len(data) < period + 1:
         return None
@@ -1536,23 +1525,13 @@ def calculate_atr(data, period=14):
     low = data["low"]
     close = data["close"]
 
-    previous_close = close.shift(1)
-
-    true_range_one = high - low
-
-    true_range_two = (
-        high - previous_close
-    ).abs()
-
-    true_range_three = (
-        low - previous_close
-    ).abs()
+    prior_close = close.shift(1)
 
     true_range = pd.concat(
         [
-            true_range_one,
-            true_range_two,
-            true_range_three,
+            high - low,
+            (high - prior_close).abs(),
+            (low - prior_close).abs(),
         ],
         axis=1,
     ).max(axis=1)
@@ -1561,120 +1540,21 @@ def calculate_atr(data, period=14):
         period
     ).mean()
 
-    latest_atr = atr.iloc[-1]
+    atr_value = atr.iloc[-1]
 
-    if pd.isna(latest_atr):
+    if pd.isna(atr_value):
         return None
 
-    return float(latest_atr)
+    return float(atr_value)
 
 
-def classify_entry_quality(
-    current_price,
-    breakout_level,
-    direction,
-):
+def calculate_pattern_target(pattern_signal):
     """
-    Classifies whether current price is close enough to the level
-    to be considered an ideal, acceptable, extended or avoid-chasing entry.
+    Calculates basic measured-move target.
 
-    This is a rule-based research classification, not trade advice.
+    Bullish: breakout level + pattern height.
+    Bearish: breakdown level - pattern height.
     """
-
-    current_price = safe_number(current_price)
-    breakout_level = safe_number(breakout_level)
-
-    if current_price is None or breakout_level is None:
-        return {
-            "status": "Insufficient data",
-            "distance_percent": None,
-            "notes": "Current price or breakout level is unavailable.",
-        }
-
-    if breakout_level == 0:
-        return {
-            "status": "Insufficient data",
-            "distance_percent": None,
-            "notes": "Breakout level is zero or unavailable.",
-        }
-
-    if direction == "Bullish":
-        distance_percent = (
-            (current_price - breakout_level)
-            / breakout_level
-        ) * 100
-
-    elif direction == "Bearish":
-        distance_percent = (
-            (breakout_level - current_price)
-            / breakout_level
-        ) * 100
-
-    else:
-        distance_percent = (
-            abs(current_price - breakout_level)
-            / breakout_level
-        ) * 100
-
-    if distance_percent <= 0:
-        status = "Below / Near Breakout Level"
-
-        notes = (
-            "Price remains at or below the selected breakout level. "
-            "Confirmation should be reviewed."
-        )
-
-    elif distance_percent <= 3:
-        status = "Ideal Entry Zone"
-
-        notes = (
-            "Price is within 3% of the breakout level."
-        )
-
-    elif distance_percent <= 7:
-        status = "Acceptable Entry Zone"
-
-        notes = (
-            "Price is moderately above the breakout level."
-        )
-
-    elif distance_percent <= 12:
-        status = "Extended"
-
-        notes = (
-            "Price has moved materially away from the breakout level."
-        )
-
-    else:
-        status = "Avoid Chasing"
-
-        notes = (
-            "Price is highly extended from the breakout level."
-        )
-
-    return {
-        "status": status,
-        "distance_percent": distance_percent,
-        "notes": notes,
-    }
-
-
-def calculate_pattern_target(
-    pattern_signal,
-):
-    """
-    Calculates a simple measured-move target.
-
-    Bullish target:
-    Breakout Level + Pattern Height
-
-    Bearish target:
-    Breakdown Level - Pattern Height
-    """
-
-    direction = pattern_signal.get(
-        "Direction"
-    )
 
     breakout_level = safe_number(
         pattern_signal.get("Level")
@@ -1682,6 +1562,10 @@ def calculate_pattern_target(
 
     pattern_height = safe_number(
         pattern_signal.get("Pattern Height")
+    )
+
+    direction = pattern_signal.get(
+        "Direction"
     )
 
     if breakout_level is None:
@@ -1702,15 +1586,101 @@ def calculate_pattern_target(
     return None
 
 
-def calculate_trade_plan(
-    data,
-    pattern_signal,
+def classify_entry_quality(
+    current_price,
+    breakout_level,
+    direction,
 ):
-    """
-    Builds a rule-based risk/reward plan for a detected technical setup.
+    """Classifies entry distance from breakout level."""
 
-    This is educational research output only. It is not a recommendation
-    to enter, exit, buy, sell, or hold a security.
+    current_price = safe_number(
+        current_price
+    )
+
+    breakout_level = safe_number(
+        breakout_level
+    )
+
+    if current_price is None or breakout_level is None:
+        return {
+            "status": "Insufficient data",
+            "distance_percent": None,
+            "notes": "Price or breakout level is unavailable.",
+        }
+
+    if breakout_level == 0:
+        return {
+            "status": "Insufficient data",
+            "distance_percent": None,
+            "notes": "Breakout level is not valid.",
+        }
+
+    if direction == "Bullish":
+        distance = (
+            (current_price - breakout_level)
+            / breakout_level
+        ) * 100
+
+    elif direction == "Bearish":
+        distance = (
+            (breakout_level - current_price)
+            / breakout_level
+        ) * 100
+
+    else:
+        distance = (
+            abs(current_price - breakout_level)
+            / breakout_level
+        ) * 100
+
+    if distance <= 0:
+        status = "Below / Near Breakout"
+
+        notes = (
+            "Price is at or below the breakout level. "
+            "Confirmation should be checked."
+        )
+
+    elif distance <= 3:
+        status = "Ideal Entry Zone"
+
+        notes = (
+            "Price is within 3% of the breakout level."
+        )
+
+    elif distance <= 7:
+        status = "Acceptable Entry Zone"
+
+        notes = (
+            "Price is moderately above breakout level."
+        )
+
+    elif distance <= 12:
+        status = "Extended"
+
+        notes = (
+            "Price has moved materially away from breakout."
+        )
+
+    else:
+        status = "Avoid Chasing"
+
+        notes = (
+            "Price is highly extended from breakout level."
+        )
+
+    return {
+        "status": status,
+        "distance_percent": distance,
+        "notes": notes,
+    }
+
+
+def calculate_trade_plan(data, pattern_signal):
+    """
+    Builds a rule-based research trade plan.
+
+    Uses pivot support/resistance and ATR-based stop levels.
     """
 
     if data is None or data.empty:
@@ -1726,7 +1696,7 @@ def calculate_trade_plan(
 
     atr = calculate_atr(
         data,
-        period=14,
+        14,
     )
 
     direction = pattern_signal.get(
@@ -1738,12 +1708,12 @@ def calculate_trade_plan(
         pattern_signal.get("Level")
     )
 
+    if breakout_level is None:
+        breakout_level = current_price
+
     target = calculate_pattern_target(
         pattern_signal
     )
-
-    if breakout_level is None:
-        breakout_level = current_price
 
     entry_quality = classify_entry_quality(
         current_price,
@@ -1755,32 +1725,39 @@ def calculate_trade_plan(
         technical_stop = support
 
         atr_stop = (
-            current_price - (2 * atr)
+            current_price - 2 * atr
             if atr is not None
             else None
         )
 
-        stop_candidates = [
-            value
-            for value in [
+        possible_stops = [
+            stop
+            for stop in [
                 technical_stop,
                 atr_stop,
             ]
-            if value is not None
-            and value < current_price
+            if stop is not None
+            and stop < current_price
         ]
 
         selected_stop = (
-            min(stop_candidates)
-            if stop_candidates
+            min(possible_stops)
+            if possible_stops
             else None
         )
 
         if target is None:
             target = resistance
 
-            if target <= current_price and atr is not None:
-                target = current_price + (3 * atr)
+            if (
+                target is None
+                or target <= current_price
+            ):
+                if atr is not None:
+                    target = (
+                        current_price
+                        + 3 * atr
+                    )
 
         risk_per_share = (
             current_price - selected_stop
@@ -1798,32 +1775,39 @@ def calculate_trade_plan(
         technical_stop = resistance
 
         atr_stop = (
-            current_price + (2 * atr)
+            current_price + 2 * atr
             if atr is not None
             else None
         )
 
-        stop_candidates = [
-            value
-            for value in [
+        possible_stops = [
+            stop
+            for stop in [
                 technical_stop,
                 atr_stop,
             ]
-            if value is not None
-            and value > current_price
+            if stop is not None
+            and stop > current_price
         ]
 
         selected_stop = (
-            max(stop_candidates)
-            if stop_candidates
+            max(possible_stops)
+            if possible_stops
             else None
         )
 
         if target is None:
             target = support
 
-            if target >= current_price and atr is not None:
-                target = current_price - (3 * atr)
+            if (
+                target is None
+                or target >= current_price
+            ):
+                if atr is not None:
+                    target = (
+                        current_price
+                        - 3 * atr
+                    )
 
         risk_per_share = (
             selected_stop - current_price
@@ -1853,7 +1837,7 @@ def calculate_trade_plan(
             "risk_per_share": None,
             "reward_per_share": None,
             "risk_reward_ratio": None,
-            "risk_reward_status": "No directional trade plan",
+            "risk_reward_status": "No directional plan",
         }
 
     risk_reward_ratio = None
@@ -1865,7 +1849,8 @@ def calculate_trade_plan(
         and reward_per_share > 0
     ):
         risk_reward_ratio = (
-            reward_per_share / risk_per_share
+            reward_per_share
+            / risk_per_share
         )
 
     if risk_reward_ratio is None:
@@ -1899,81 +1884,6 @@ def calculate_trade_plan(
         "reward_per_share": reward_per_share,
         "risk_reward_ratio": risk_reward_ratio,
         "risk_reward_status": risk_reward_status,
-    }
-
-
-def calculate_position_size(
-    portfolio_value,
-    risk_percent,
-    entry_price,
-    stop_loss,
-):
-    """
-    Calculates maximum position size using fixed percentage risk.
-
-    Maximum loss = Portfolio Value × Risk Percentage.
-
-    Quantity = Maximum Loss / Risk Per Share.
-    """
-
-    portfolio_value = safe_number(
-        portfolio_value
-    )
-
-    risk_percent = safe_number(
-        risk_percent
-    )
-
-    entry_price = safe_number(
-        entry_price
-    )
-
-    stop_loss = safe_number(
-        stop_loss
-    )
-
-    if (
-        portfolio_value is None
-        or risk_percent is None
-        or entry_price is None
-        or stop_loss is None
-    ):
-        return None
-
-    risk_per_share = abs(
-        entry_price - stop_loss
-    )
-
-    if risk_per_share <= 0:
-        return None
-
-    maximum_allowed_loss = (
-        portfolio_value * risk_percent / 100
-    )
-
-    maximum_quantity = int(
-        maximum_allowed_loss / risk_per_share
-    )
-
-    approximate_position_value = (
-        maximum_quantity * entry_price
-    )
-
-    portfolio_allocation_percent = (
-        approximate_position_value
-        / portfolio_value
-    ) * 100
-
-    return {
-        "portfolio_value": portfolio_value,
-        "risk_percent": risk_percent,
-        "maximum_allowed_loss": maximum_allowed_loss,
-        "entry_price": entry_price,
-        "stop_loss": stop_loss,
-        "risk_per_share": risk_per_share,
-        "maximum_quantity": maximum_quantity,
-        "position_value": approximate_position_value,
-        "portfolio_allocation_percent": portfolio_allocation_percent,
     }
 
 
@@ -2126,7 +2036,7 @@ def score_alignment(alignment):
     elif status == "Mixed timeframe alignment":
         score += 5
         risks.append(
-            "Timeframes are not fully aligned"
+            "Daily, Weekly and Monthly trends are mixed"
         )
 
     elif status == "Bearish multi-timeframe alignment":
@@ -2174,59 +2084,43 @@ def score_alignment(alignment):
     }
 
 
-def score_fundamental_quality(fundamentals):
-    """Scores basic available fundamental quality out of 20."""
+def score_fundamentals(fundamentals):
+    """Scores available basic fundamental quality out of 20."""
 
     score = 0
     positives = []
     risks = []
 
     roe = safe_number(
-        fundamentals.get(
-            "returnOnEquity"
-        )
+        fundamentals.get("returnOnEquity")
     )
 
     roa = safe_number(
-        fundamentals.get(
-            "returnOnAssets"
-        )
+        fundamentals.get("returnOnAssets")
     )
 
     profit_margin = safe_number(
-        fundamentals.get(
-            "profitMargins"
-        )
+        fundamentals.get("profitMargins")
     )
 
     operating_margin = safe_number(
-        fundamentals.get(
-            "operatingMargins"
-        )
+        fundamentals.get("operatingMargins")
     )
 
     revenue_growth = safe_number(
-        fundamentals.get(
-            "revenueGrowth"
-        )
+        fundamentals.get("revenueGrowth")
     )
 
     earnings_growth = safe_number(
-        fundamentals.get(
-            "earningsGrowth"
-        )
+        fundamentals.get("earningsGrowth")
     )
 
     debt_equity = safe_number(
-        fundamentals.get(
-            "debtToEquity"
-        )
+        fundamentals.get("debtToEquity")
     )
 
     free_cashflow = safe_number(
-        fundamentals.get(
-            "freeCashflow"
-        )
+        fundamentals.get("freeCashflow")
     )
 
     if roe is not None:
@@ -2294,7 +2188,7 @@ def score_fundamental_quality(fundamentals):
 
         elif revenue_growth < 0:
             risks.append(
-                "Negative revenue growth"
+                "Revenue growth is negative"
             )
 
     if earnings_growth is not None:
@@ -2309,7 +2203,7 @@ def score_fundamental_quality(fundamentals):
 
         elif earnings_growth < 0:
             risks.append(
-                "Negative earnings growth"
+                "Earnings growth is negative"
             )
 
     if debt_equity is not None:
@@ -2343,12 +2237,12 @@ def score_fundamental_quality(fundamentals):
     }
 
 
-def score_technical_trend(
+def score_technical_trends(
     daily_data,
     weekly_data,
     monthly_data,
 ):
-    """Scores individual timeframe trends out of 15."""
+    """Scores individual chart trend quality out of 15."""
 
     score = 0
     positives = []
@@ -2424,12 +2318,12 @@ def score_technical_trend(
     }
 
 
-def score_pattern_quality(
+def score_patterns(
     daily_patterns,
     weekly_patterns,
     monthly_patterns,
 ):
-    """Scores current pattern and breakout quality out of 15."""
+    """Scores current technical breakout quality out of 15."""
 
     score = 0
     positives = []
@@ -2437,7 +2331,7 @@ def score_pattern_quality(
 
     confirmed_bullish = False
 
-    pattern_groups = [
+    all_pattern_sets = [
         (
             "Daily",
             daily_patterns,
@@ -2452,11 +2346,11 @@ def score_pattern_quality(
         ),
     ]
 
-    for timeframe, patterns in pattern_groups:
+    for timeframe, patterns in all_pattern_sets:
         for pattern in patterns:
             status = pattern.get("Status")
             direction = pattern.get("Direction")
-            pattern_name = pattern.get("Pattern")
+            name = pattern.get("Pattern")
 
             if (
                 status == "Confirmed"
@@ -2474,7 +2368,7 @@ def score_pattern_quality(
                     score += 4
 
                 positives.append(
-                    f"Confirmed Bullish {pattern_name} on {timeframe}"
+                    f"Confirmed Bullish {name} on {timeframe}"
                 )
 
             elif (
@@ -2488,7 +2382,7 @@ def score_pattern_quality(
                     score += 1
 
                 positives.append(
-                    f"Bullish {pattern_name} forming on {timeframe}"
+                    f"Bullish {name} forming on {timeframe}"
                 )
 
             elif (
@@ -2496,7 +2390,7 @@ def score_pattern_quality(
                 and direction == "Bearish"
             ):
                 risks.append(
-                    f"Confirmed Bearish {pattern_name} on {timeframe}"
+                    f"Confirmed Bearish {name} on {timeframe}"
                 )
 
     if not confirmed_bullish:
@@ -2511,43 +2405,45 @@ def score_pattern_quality(
     }
 
 
-def score_volume_confirmation(
+def score_volume(
     daily_patterns,
     weekly_patterns,
 ):
-    """Scores bullish breakout volume confirmation out of 5."""
+    """Scores breakout volume confirmation out of 5."""
 
-    volume_values = []
+    bullish_volumes = []
 
     for pattern in daily_patterns + weekly_patterns:
         if (
             pattern.get("Status") == "Confirmed"
             and pattern.get("Direction") == "Bullish"
         ):
-            volume_change = safe_number(
+            volume = safe_number(
                 pattern.get("Volume %")
             )
 
-            if volume_change is not None:
-                volume_values.append(
-                    volume_change
+            if volume is not None:
+                bullish_volumes.append(
+                    volume
                 )
 
-    if not volume_values:
+    if not bullish_volumes:
         return {
             "score": 0,
             "positives": [],
             "risks": [],
         }
 
-    highest_volume = max(volume_values)
+    highest_volume = max(
+        bullish_volumes
+    )
 
     if highest_volume >= 50:
         return {
             "score": 5,
             "positives": [
                 (
-                    "Strong breakout volume confirmation: "
+                    "Strong breakout volume: "
                     f"{highest_volume:.1f}% above average"
                 )
             ],
@@ -2559,7 +2455,7 @@ def score_volume_confirmation(
             "score": 4,
             "positives": [
                 (
-                    "Good breakout volume confirmation: "
+                    "Good breakout volume: "
                     f"{highest_volume:.1f}% above average"
                 )
             ],
@@ -2571,7 +2467,7 @@ def score_volume_confirmation(
             "score": 2,
             "positives": [
                 (
-                    "Positive breakout volume confirmation: "
+                    "Positive breakout volume: "
                     f"{highest_volume:.1f}% above average"
                 )
             ],
@@ -2582,19 +2478,19 @@ def score_volume_confirmation(
         "score": 0,
         "positives": [],
         "risks": [
-            "Bullish breakout volume is below average"
+            "Breakout volume is below average"
         ],
     }
 
 
 def score_valuation_risk(fundamentals):
-    """Scores valuation and leverage factors out of 5."""
+    """Scores basic valuation and leverage factors out of 5."""
 
     score = 0
     positives = []
     risks = []
 
-    trailing_pe = safe_number(
+    pe = safe_number(
         fundamentals.get("trailingPE")
     )
 
@@ -2606,16 +2502,16 @@ def score_valuation_risk(fundamentals):
         fundamentals.get("debtToEquity")
     )
 
-    if trailing_pe is not None:
-        if 0 < trailing_pe <= 20:
+    if pe is not None:
+        if 0 < pe <= 20:
             score += 2
             positives.append(
-                f"Reasonable P/E: {trailing_pe:.1f}"
+                f"Reasonable P/E: {pe:.1f}"
             )
 
-        elif trailing_pe > 80:
+        elif pe > 80:
             risks.append(
-                f"Very high P/E: {trailing_pe:.1f}"
+                f"Very high P/E: {pe:.1f}"
             )
 
     if price_to_book is not None:
@@ -2660,35 +2556,33 @@ def calculate_winner_score(
     weekly_patterns,
     monthly_patterns,
 ):
-    """Calculates a transparent Winner Score out of 100."""
+    """Calculates transparent Winner Score out of 100."""
 
-    relative_strength_component = (
-        score_relative_strength(
-            relative_strength
-        )
+    rs_component = score_relative_strength(
+        relative_strength
     )
 
     alignment_component = score_alignment(
         alignment
     )
 
-    fundamental_component = score_fundamental_quality(
+    fundamental_component = score_fundamentals(
         fundamentals
     )
 
-    technical_component = score_technical_trend(
+    technical_component = score_technical_trends(
         daily_data,
         weekly_data,
         monthly_data,
     )
 
-    pattern_component = score_pattern_quality(
+    pattern_component = score_patterns(
         daily_patterns,
         weekly_patterns,
         monthly_patterns,
     )
 
-    volume_component = score_volume_confirmation(
+    volume_component = score_volume(
         daily_patterns,
         weekly_patterns,
     )
@@ -2697,8 +2591,8 @@ def calculate_winner_score(
         fundamentals
     )
 
-    final_score = (
-        relative_strength_component["score"]
+    total_score = (
+        rs_component["score"]
         + alignment_component["score"]
         + fundamental_component["score"]
         + technical_component["score"]
@@ -2707,28 +2601,28 @@ def calculate_winner_score(
         + valuation_component["score"]
     )
 
-    final_score = min(
-        round(final_score, 1),
+    total_score = min(
+        round(total_score, 1),
         100,
     )
 
-    if final_score >= 80:
+    if total_score >= 80:
         category = "Elite Candidate"
 
-    elif final_score >= 65:
+    elif total_score >= 65:
         category = "High-Conviction Watchlist"
 
-    elif final_score >= 50:
+    elif total_score >= 50:
         category = "Watchlist"
 
-    elif final_score >= 35:
+    elif total_score >= 35:
         category = "Neutral / Mixed"
 
     else:
         category = "Avoid / Weak"
 
     positives = (
-        relative_strength_component["positives"]
+        rs_component["positives"]
         + alignment_component["positives"]
         + fundamental_component["positives"]
         + technical_component["positives"]
@@ -2738,7 +2632,7 @@ def calculate_winner_score(
     )
 
     risks = (
-        relative_strength_component["risks"]
+        rs_component["risks"]
         + alignment_component["risks"]
         + fundamental_component["risks"]
         + technical_component["risks"]
@@ -2748,13 +2642,11 @@ def calculate_winner_score(
     )
 
     return {
-        "score": final_score,
+        "score": total_score,
         "category": category,
-        "fundamental_score": fundamental_component["score"],
-        "relative_strength_score": relative_strength_component[
-            "score"
-        ],
+        "relative_strength_score": rs_component["score"],
         "alignment_score": alignment_component["score"],
+        "fundamental_score": fundamental_component["score"],
         "technical_score": technical_component["score"],
         "pattern_score": pattern_component["score"],
         "volume_score": volume_component["score"],
@@ -2765,15 +2657,519 @@ def calculate_winner_score(
 
 
 # =============================================================================
+# COMMAND CENTER MARKET REGIME
+# =============================================================================
+
+def calculate_market_regime(
+    nifty_50_data,
+    breadth_data,
+):
+    """
+    Calculates market regime from Nifty 50 trend and Nifty-universe breadth.
+    """
+
+    nifty_trend = calculate_overall_trend(
+        nifty_50_data
+    )
+
+    breadth_above_50 = safe_number(
+        breadth_data.get("above_50dma_percent")
+    )
+
+    breadth_above_200 = safe_number(
+        breadth_data.get("above_200dma_percent")
+    )
+
+    if (
+        nifty_trend == "Strong bullish"
+        and breadth_above_50 is not None
+        and breadth_above_50 >= 60
+    ):
+        regime = "Strong Bullish"
+
+        description = (
+            "Nifty 50 trend and market breadth are supportive."
+        )
+
+    elif (
+        nifty_trend in [
+            "Strong bullish",
+            "Bullish",
+        ]
+        and breadth_above_50 is not None
+        and breadth_above_50 >= 50
+    ):
+        regime = "Bullish"
+
+        description = (
+            "Market conditions are generally constructive."
+        )
+
+    elif (
+        nifty_trend == "Bearish"
+        or (
+            breadth_above_50 is not None
+            and breadth_above_50 < 35
+        )
+    ):
+        regime = "Defensive"
+
+        description = (
+            "Market participation is weak; reduce breakout expectations."
+        )
+
+    else:
+        regime = "Neutral"
+
+        description = (
+            "Market conditions are mixed."
+        )
+
+    return {
+        "regime": regime,
+        "nifty_trend": nifty_trend,
+        "breadth_50": breadth_above_50,
+        "breadth_200": breadth_above_200,
+        "description": description,
+    }
+
+
+def calculate_market_breadth(scan_records):
+    """
+    Calculates breadth from scanned stocks.
+
+    Breadth:
+    Percentage of scanned stocks above 50 DMA and 200 DMA.
+    """
+
+    above_50_count = 0
+    above_200_count = 0
+    valid_count = 0
+
+    for record in scan_records:
+        close = safe_number(
+            record.get("Current Price")
+        )
+
+        ma50 = safe_number(
+            record.get("MA50")
+        )
+
+        ma200 = safe_number(
+            record.get("MA200")
+        )
+
+        if close is None:
+            continue
+
+        valid_count += 1
+
+        if ma50 is not None and close > ma50:
+            above_50_count += 1
+
+        if ma200 is not None and close > ma200:
+            above_200_count += 1
+
+    if valid_count == 0:
+        return {
+            "above_50dma_percent": None,
+            "above_200dma_percent": None,
+            "valid_count": 0,
+        }
+
+    return {
+        "above_50dma_percent": (
+            above_50_count / valid_count
+        ) * 100,
+        "above_200dma_percent": (
+            above_200_count / valid_count
+        ) * 100,
+        "valid_count": valid_count,
+    }
+
+
+def get_moving_average_values(data):
+    """Gets latest MA20, MA50 and MA200 values where available."""
+
+    if data.empty:
+        return {
+            "MA20": None,
+            "MA50": None,
+            "MA200": None,
+        }
+
+    ma20 = (
+        float(
+            data["close"]
+            .rolling(20)
+            .mean()
+            .iloc[-1]
+        )
+        if len(data) >= 20
+        else None
+    )
+
+    ma50 = (
+        float(
+            data["close"]
+            .rolling(50)
+            .mean()
+            .iloc[-1]
+        )
+        if len(data) >= 50
+        else None
+    )
+
+    ma200 = (
+        float(
+            data["close"]
+            .rolling(200)
+            .mean()
+            .iloc[-1]
+        )
+        if len(data) >= 200
+        else None
+    )
+
+    return {
+        "MA20": ma20,
+        "MA50": ma50,
+        "MA200": ma200,
+    }
+
+
+# =============================================================================
+# COMMAND CENTER SCAN
+# =============================================================================
+
+def analyse_stock_for_command_center(
+    symbol,
+    ticker,
+    company_name,
+    industry,
+    nifty_data,
+    minimum_market_cap,
+):
+    """
+    Builds a complete command-center record for one stock.
+    """
+
+    stock_data = fetch_price_data(
+        ticker,
+        "5y",
+    )
+
+    if stock_data.empty:
+        return None
+
+    fundamentals = fetch_fundamentals(
+        ticker
+    )
+
+    market_cap = safe_number(
+        fundamentals.get("marketCap"),
+        0,
+    )
+
+    market_cap_crore = market_cap / 10000000
+
+    if market_cap_crore < minimum_market_cap:
+        return None
+
+    daily_data = stock_data
+
+    weekly_data = resample_ohlcv(
+        stock_data,
+        "Weekly",
+    )
+
+    monthly_data = resample_ohlcv(
+        stock_data,
+        "Monthly",
+    )
+
+    daily_patterns = detect_patterns(
+        daily_data
+    )
+
+    weekly_patterns = detect_patterns(
+        weekly_data
+    )
+
+    monthly_patterns = detect_patterns(
+        monthly_data
+    )
+
+    relative_strength = calculate_relative_strength(
+        stock_data,
+        nifty_data,
+    )
+
+    alignment = calculate_multitimeframe_alignment(
+        daily_data,
+        weekly_data,
+        monthly_data,
+    )
+
+    winner_score = calculate_winner_score(
+        fundamentals=fundamentals,
+        relative_strength=relative_strength,
+        alignment=alignment,
+        daily_data=daily_data,
+        weekly_data=weekly_data,
+        monthly_data=monthly_data,
+        daily_patterns=daily_patterns,
+        weekly_patterns=weekly_patterns,
+        monthly_patterns=monthly_patterns,
+    )
+
+    moving_averages = get_moving_average_values(
+        daily_data
+    )
+
+    current_price = float(
+        daily_data["close"].iloc[-1]
+    )
+
+    latest_date = daily_data.index[-1]
+
+    all_patterns = []
+
+    for timeframe_name, patterns in [
+        (
+            "Daily",
+            daily_patterns,
+        ),
+        (
+            "Weekly",
+            weekly_patterns,
+        ),
+        (
+            "Monthly",
+            monthly_patterns,
+        ),
+    ]:
+        for pattern in patterns:
+            all_patterns.append(
+                {
+                    "Timeframe": timeframe_name,
+                    **pattern,
+                }
+            )
+
+    bullish_confirmed_patterns = [
+        pattern
+        for pattern in all_patterns
+        if (
+            pattern.get("Status") == "Confirmed"
+            and pattern.get("Direction") == "Bullish"
+        )
+    ]
+
+    bearish_confirmed_patterns = [
+        pattern
+        for pattern in all_patterns
+        if (
+            pattern.get("Status") == "Confirmed"
+            and pattern.get("Direction") == "Bearish"
+        )
+    ]
+
+    selected_pattern = None
+
+    if bullish_confirmed_patterns:
+        priority = {
+            "Monthly": 3,
+            "Weekly": 2,
+            "Daily": 1,
+        }
+
+        bullish_confirmed_patterns = sorted(
+            bullish_confirmed_patterns,
+            key=lambda item: priority.get(
+                item["Timeframe"],
+                0,
+            ),
+            reverse=True,
+        )
+
+        selected_pattern = bullish_confirmed_patterns[0]
+
+    elif all_patterns:
+        selected_pattern = all_patterns[0]
+
+    trade_plan = None
+
+    if selected_pattern is not None:
+        selected_timeframe = selected_pattern[
+            "Timeframe"
+        ]
+
+        if selected_timeframe == "Daily":
+            plan_data = daily_data
+
+        elif selected_timeframe == "Weekly":
+            plan_data = weekly_data
+
+        else:
+            plan_data = monthly_data
+
+        trade_plan = calculate_trade_plan(
+            plan_data,
+            selected_pattern,
+        )
+
+    support, resistance = calculate_support_resistance(
+        daily_data
+    )
+
+    return {
+        "Stock": symbol,
+        "Company": company_name,
+        "Industry": industry,
+        "Ticker": ticker,
+        "Date": latest_date,
+        "Current Price": current_price,
+        "Market Cap (Cr)": market_cap_crore,
+        "Winner Score": winner_score["score"],
+        "Winner Category": winner_score["category"],
+        "RS Status": relative_strength["status"],
+        "RS Trend": relative_strength["rs_trend"],
+        "RS 3M %": relative_strength["relative_3m"],
+        "RS 6M %": relative_strength["relative_6m"],
+        "Daily Trend": alignment["daily"],
+        "Weekly Trend": alignment["weekly"],
+        "Monthly Trend": alignment["monthly"],
+        "MTF Score": alignment["score"],
+        "MTF Alignment": alignment["status"],
+        "Current Pattern": (
+            selected_pattern.get("Pattern")
+            if selected_pattern is not None
+            else "No active pattern"
+        ),
+        "Pattern Status": (
+            selected_pattern.get("Status")
+            if selected_pattern is not None
+            else "No Pattern"
+        ),
+        "Pattern Direction": (
+            selected_pattern.get("Direction")
+            if selected_pattern is not None
+            else "Neutral"
+        ),
+        "Pattern Timeframe": (
+            selected_pattern.get("Timeframe")
+            if selected_pattern is not None
+            else "Overall"
+        ),
+        "Breakout Level": (
+            selected_pattern.get("Level")
+            if selected_pattern is not None
+            else None
+        ),
+        "Pattern Volume %": (
+            selected_pattern.get("Volume %")
+            if selected_pattern is not None
+            else None
+        ),
+        "Support": support,
+        "Resistance": resistance,
+        "MA20": moving_averages["MA20"],
+        "MA50": moving_averages["MA50"],
+        "MA200": moving_averages["MA200"],
+        "Entry Quality": (
+            trade_plan["entry_quality"]["status"]
+            if trade_plan is not None
+            else "No directional setup"
+        ),
+        "Distance From Breakout %": (
+            trade_plan["entry_quality"]["distance_percent"]
+            if trade_plan is not None
+            else None
+        ),
+        "Stop Loss": (
+            trade_plan["selected_stop"]
+            if trade_plan is not None
+            else None
+        ),
+        "Target": (
+            trade_plan["target"]
+            if trade_plan is not None
+            else None
+        ),
+        "Risk Reward": (
+            trade_plan["risk_reward_ratio"]
+            if trade_plan is not None
+            else None
+        ),
+        "Risk Reward Status": (
+            trade_plan["risk_reward_status"]
+            if trade_plan is not None
+            else "No directional plan"
+        ),
+        "Bullish Confirmed Count": len(
+            bullish_confirmed_patterns
+        ),
+        "Bearish Confirmed Count": len(
+            bearish_confirmed_patterns
+        ),
+        "Risk Flags": " | ".join(
+            winner_score["risks"][:5]
+        ),
+        "Positive Evidence": " | ".join(
+            winner_score["positives"][:5]
+        ),
+    }
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def run_command_center_scan(
+    universe_data,
+    benchmark_data,
+    minimum_market_cap,
+    scan_limit,
+):
+    """
+    Runs the command-center scan.
+
+    The result is cached for 15 minutes.
+    """
+
+    scan_rows = []
+
+    limited_universe = universe_data.head(
+        scan_limit
+    ).copy()
+
+    for _, record in limited_universe.iterrows():
+        result = analyse_stock_for_command_center(
+            symbol=record["Symbol"],
+            ticker=record["Ticker"],
+            company_name=record["Company Name"],
+            industry=record["Industry"],
+            nifty_data=benchmark_data,
+            minimum_market_cap=minimum_market_cap,
+        )
+
+        if result is not None:
+            scan_rows.append(result)
+
+    if not scan_rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(scan_rows)
+
+
+# =============================================================================
 # CHART FUNCTIONS
 # =============================================================================
 
 def create_candlestick_chart(
     data,
-    signals,
+    patterns,
     title,
 ):
-    """Creates candlestick chart with MA20, MA50, volume and signal levels."""
+    """Creates stock candlestick chart with moving averages and volume."""
 
     chart_data = data.tail(260).copy()
 
@@ -2837,20 +3233,20 @@ def create_candlestick_chart(
         col=1,
     )
 
-    for signal in signals:
-        line_color = "#16a34a"
+    for pattern in patterns:
+        color = "#16a34a"
 
-        if signal["Direction"] == "Bearish":
-            line_color = "#dc2626"
+        if pattern["Direction"] == "Bearish":
+            color = "#dc2626"
 
-        elif signal["Direction"] == "Neutral":
-            line_color = "#f59e0b"
+        elif pattern["Direction"] == "Neutral":
+            color = "#f59e0b"
 
         figure.add_hline(
-            y=signal["Level"],
+            y=pattern["Level"],
             line_dash="dot",
-            line_color=line_color,
-            annotation_text=signal["Pattern"],
+            line_color=color,
+            annotation_text=pattern["Pattern"],
             row=1,
             col=1,
         )
@@ -2861,12 +3257,6 @@ def create_candlestick_chart(
         template="plotly_white",
         xaxis_rangeslider_visible=False,
         legend_orientation="h",
-        margin=dict(
-            l=10,
-            r=10,
-            t=50,
-            b=10,
-        ),
     )
 
     return figure
@@ -2876,7 +3266,7 @@ def create_relative_strength_chart(
     rs_line,
     symbol,
 ):
-    """Creates Relative Strength line chart vs Nifty 50."""
+    """Creates RS line chart versus Nifty 50."""
 
     figure = go.Figure()
 
@@ -2895,26 +3285,18 @@ def create_relative_strength_chart(
         )
 
     figure.update_layout(
-        title=(
-            f"{symbol} Relative Strength vs Nifty 50"
-        ),
-        height=360,
+        title=f"{symbol} Relative Strength vs Nifty 50",
+        height=350,
         template="plotly_white",
         xaxis_title="Date",
         yaxis_title="Stock Price / Nifty 50",
-        margin=dict(
-            l=10,
-            r=10,
-            t=50,
-            b=10,
-        ),
     )
 
     return figure
 
 
 # =============================================================================
-# LOAD STOCK UNIVERSE AND BENCHMARK
+# LOAD UNIVERSE AND BENCHMARK
 # =============================================================================
 
 with st.spinner(
@@ -2925,7 +3307,7 @@ with st.spinner(
     )
 
 with st.spinner(
-    "Loading Nifty 50 benchmark data..."
+    "Loading Nifty 50 benchmark..."
 ):
     nifty_50_data = fetch_price_data(
         NIFTY_50_BENCHMARK,
@@ -2934,13 +3316,13 @@ with st.spinner(
 
 
 # =============================================================================
-# HEADER
+# PAGE HEADER
 # =============================================================================
 
 st.markdown(
     """
     <div class="main-title">
-        🏆 Nifty Total Market Winner Research Dashboard
+        🏆 Nifty Total Market Daily Command Center
     </div>
     """,
     unsafe_allow_html=True,
@@ -2949,8 +3331,8 @@ st.markdown(
 st.markdown(
     """
     <div class="sub-title">
-        Technical patterns • Relative strength • Winner Score •
-        Multi-timeframe alignment • Risk/Reward research plan
+        Find stronger stocks, confirmed breakouts, ideal entry zones,
+        extended setups and risk alerts from the Nifty Total Market universe.
     </div>
     """,
     unsafe_allow_html=True,
@@ -2961,15 +3343,14 @@ if universe_error:
 
 if stock_universe.empty:
     st.error(
-        "No stock universe is available. "
-        "Refresh the cached data and try again."
+        "No stock universe is currently available."
     )
     st.stop()
 
 if nifty_50_data.empty:
     st.warning(
-        "Nifty 50 benchmark data is unavailable. "
-        "Relative Strength results may be incomplete."
+        "Nifty 50 benchmark data could not be loaded. "
+        "Relative strength results may be unavailable."
     )
 
 
@@ -2981,10 +3362,11 @@ with st.sidebar:
     st.header("🔍 Dashboard Controls")
 
     dashboard_mode = st.radio(
-        "Mode",
+        "Dashboard View",
         [
-            "Stock research",
-            "Winner ranking scanner",
+            "Daily Command Center",
+            "Stock Research",
+            "Winner Ranking Scanner",
         ],
     )
 
@@ -2995,42 +3377,723 @@ with st.sidebar:
         step=1000,
     )
 
-    st.caption(
-        f"Loaded universe: {len(stock_universe)} stocks"
+    command_center_scan_limit = st.selectbox(
+        "Command Center scan size",
+        [
+            50,
+            100,
+            250,
+            500,
+            750,
+        ],
+        index=1,
     )
 
-    if st.button("🔄 Refresh cached data"):
+    st.caption(
+        f"Nifty universe loaded: {len(stock_universe)} stocks"
+    )
+
+    if st.button("🔄 Refresh all cached data"):
         st.cache_data.clear()
         st.rerun()
 
     st.divider()
 
     st.caption(
-        "Price data cache: 15 minutes\n\n"
-        "Fundamental data cache: 12 hours\n\n"
-        "Constituent data cache: 6 hours"
+        "Prices and command-center scans cache for 15 minutes.\n\n"
+        "Fundamental data caches for 12 hours.\n\n"
+        "The constituent list caches for 6 hours."
     )
 
 
 # =============================================================================
-# STOCK RESEARCH MODE
+# DAILY COMMAND CENTER
 # =============================================================================
 
-if dashboard_mode == "Stock research":
-    available_symbols = sorted(
+if dashboard_mode == "Daily Command Center":
+    st.subheader(
+        "Daily Market Command Center"
+    )
+
+    st.caption(
+        "Run the scan once, then use the sections below to identify "
+        "market regime, strongest candidates, breakouts, ideal entries, "
+        "extended stocks, and risk signals."
+    )
+
+    if st.button(
+        "▶ Run / Refresh Command Center Scan",
+        type="primary",
+    ):
+        with st.spinner(
+            "Scanning selected Nifty Total Market stocks..."
+        ):
+            command_center_data = run_command_center_scan(
+                universe_data=stock_universe,
+                benchmark_data=nifty_50_data,
+                minimum_market_cap=minimum_market_cap,
+                scan_limit=command_center_scan_limit,
+            )
+
+        st.session_state[
+            "command_center_data"
+        ] = command_center_data
+
+    if "command_center_data" not in st.session_state:
+        st.info(
+            "Click Run / Refresh Command Center Scan to build "
+            "today's market dashboard."
+        )
+
+    else:
+        command_center_data = st.session_state[
+            "command_center_data"
+        ].copy()
+
+        if command_center_data.empty:
+            st.warning(
+                "No eligible stocks were found in the selected scan range. "
+                "Try reducing the minimum market-cap filter or increasing "
+                "the scan size."
+            )
+
+        else:
+            breadth = calculate_market_breadth(
+                command_center_data.to_dict(
+                    "records"
+                )
+            )
+
+            market_regime = calculate_market_regime(
+                nifty_50_data,
+                breadth,
+            )
+
+            regime_card = "orange-card"
+
+            if market_regime["regime"] in [
+                "Strong Bullish",
+                "Bullish",
+            ]:
+                regime_card = "green-card"
+
+            elif market_regime["regime"] == "Defensive":
+                regime_card = "red-card"
+
+            st.markdown(
+                f"""
+                <div class="research-card {regime_card}">
+                    <h3>Market Regime: {market_regime["regime"]}</h3>
+                    <p>{market_regime["description"]}</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            regime_col1, regime_col2, regime_col3, regime_col4 = (
+                st.columns(4)
+            )
+
+            regime_col1.metric(
+                "Nifty 50 Trend",
+                market_regime["nifty_trend"],
+            )
+
+            regime_col2.metric(
+                "Stocks Above 50 DMA",
+                (
+                    f"{market_regime['breadth_50']:.1f}%"
+                    if market_regime["breadth_50"] is not None
+                    else "Not available"
+                ),
+            )
+
+            regime_col3.metric(
+                "Stocks Above 200 DMA",
+                (
+                    f"{market_regime['breadth_200']:.1f}%"
+                    if market_regime["breadth_200"] is not None
+                    else "Not available"
+                ),
+            )
+
+            regime_col4.metric(
+                "Scanned Eligible Stocks",
+                market_regime["breadth_50"]
+                and breadth["valid_count"],
+            )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # TOP WINNER CANDIDATES
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "🏆 Top Winner Candidates"
+            )
+
+            top_candidates = (
+                command_center_data
+                .sort_values(
+                    by=[
+                        "Winner Score",
+                        "MTF Score",
+                        "RS 6M %",
+                    ],
+                    ascending=[
+                        False,
+                        False,
+                        False,
+                    ],
+                )
+                .head(15)
+                .copy()
+            )
+
+            st.dataframe(
+                top_candidates[
+                    [
+                        "Stock",
+                        "Company",
+                        "Winner Score",
+                        "Winner Category",
+                        "RS Status",
+                        "RS Trend",
+                        "MTF Score",
+                        "MTF Alignment",
+                        "Weekly Trend",
+                        "Monthly Trend",
+                        "Current Pattern",
+                        "Pattern Status",
+                        "Entry Quality",
+                        "Risk Reward",
+                    ]
+                ],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Winner Score": st.column_config.ProgressColumn(
+                        "Winner Score",
+                        min_value=0,
+                        max_value=100,
+                        format="%.1f",
+                    ),
+                    "MTF Score": st.column_config.NumberColumn(
+                        "MTF Score",
+                        format="%.0f/10",
+                    ),
+                    "Risk Reward": st.column_config.NumberColumn(
+                        "Risk / Reward",
+                        format="1 : %.2f",
+                    ),
+                },
+            )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # NEW CONFIRMED BREAKOUTS
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "📈 New Confirmed Breakouts"
+            )
+
+            confirmed_breakouts = command_center_data[
+                (
+                    command_center_data[
+                        "Pattern Status"
+                    ]
+                    == "Confirmed"
+                )
+                & (
+                    command_center_data[
+                        "Pattern Direction"
+                    ]
+                    == "Bullish"
+                )
+            ].copy()
+
+            confirmed_breakouts = (
+                confirmed_breakouts
+                .sort_values(
+                    by=[
+                        "Winner Score",
+                        "Pattern Volume %",
+                    ],
+                    ascending=[
+                        False,
+                        False,
+                    ],
+                )
+                .head(25)
+            )
+
+            if not confirmed_breakouts.empty:
+                st.dataframe(
+                    confirmed_breakouts[
+                        [
+                            "Stock",
+                            "Company",
+                            "Current Pattern",
+                            "Pattern Timeframe",
+                            "Pattern Volume %",
+                            "Winner Score",
+                            "RS Status",
+                            "MTF Alignment",
+                            "Entry Quality",
+                            "Risk Reward",
+                        ]
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Pattern Volume %": st.column_config.NumberColumn(
+                            "Volume vs Average",
+                            format="%.1f%%",
+                        ),
+                        "Winner Score": st.column_config.ProgressColumn(
+                            "Winner Score",
+                            min_value=0,
+                            max_value=100,
+                            format="%.1f",
+                        ),
+                        "Risk Reward": st.column_config.NumberColumn(
+                            "Risk / Reward",
+                            format="1 : %.2f",
+                        ),
+                    },
+                )
+
+            else:
+                st.info(
+                    "No confirmed bullish breakouts were detected "
+                    "in the scanned universe."
+                )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # IDEAL ENTRY ZONES
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "🎯 Near Ideal Entry Zone"
+            )
+
+            ideal_entries = command_center_data[
+                (
+                    command_center_data[
+                        "Entry Quality"
+                    ]
+                    .isin(
+                        [
+                            "Ideal Entry Zone",
+                            "Acceptable Entry Zone",
+                        ]
+                    )
+                )
+                & (
+                    command_center_data[
+                        "Pattern Direction"
+                    ]
+                    == "Bullish"
+                )
+                & (
+                    command_center_data[
+                        "Winner Score"
+                    ]
+                    >= 50
+                )
+            ].copy()
+
+            ideal_entries = (
+                ideal_entries
+                .sort_values(
+                    by=[
+                        "Winner Score",
+                        "Risk Reward",
+                    ],
+                    ascending=[
+                        False,
+                        False,
+                    ],
+                )
+                .head(25)
+            )
+
+            if not ideal_entries.empty:
+                st.dataframe(
+                    ideal_entries[
+                        [
+                            "Stock",
+                            "Company",
+                            "Current Pattern",
+                            "Pattern Timeframe",
+                            "Breakout Level",
+                            "Current Price",
+                            "Distance From Breakout %",
+                            "Entry Quality",
+                            "Stop Loss",
+                            "Target",
+                            "Risk Reward",
+                            "Winner Score",
+                        ]
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Breakout Level": st.column_config.NumberColumn(
+                            "Breakout Level",
+                            format="₹%.2f",
+                        ),
+                        "Current Price": st.column_config.NumberColumn(
+                            "Current Price",
+                            format="₹%.2f",
+                        ),
+                        "Distance From Breakout %": st.column_config.NumberColumn(
+                            "Distance",
+                            format="%.2f%%",
+                        ),
+                        "Stop Loss": st.column_config.NumberColumn(
+                            "Stop Loss",
+                            format="₹%.2f",
+                        ),
+                        "Target": st.column_config.NumberColumn(
+                            "Target",
+                            format="₹%.2f",
+                        ),
+                        "Risk Reward": st.column_config.NumberColumn(
+                            "Risk / Reward",
+                            format="1 : %.2f",
+                        ),
+                        "Winner Score": st.column_config.ProgressColumn(
+                            "Winner Score",
+                            min_value=0,
+                            max_value=100,
+                            format="%.1f",
+                        ),
+                    },
+                )
+
+            else:
+                st.info(
+                    "No bullish setups near an ideal or acceptable "
+                    "entry zone were found."
+                )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # EXTENDED / AVOID CHASING
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "⚠️ Extended / Avoid Chasing"
+            )
+
+            extended_setups = command_center_data[
+                (
+                    command_center_data[
+                        "Entry Quality"
+                    ]
+                    .isin(
+                        [
+                            "Extended",
+                            "Avoid Chasing",
+                        ]
+                    )
+                )
+                & (
+                    command_center_data[
+                        "Pattern Direction"
+                    ]
+                    == "Bullish"
+                )
+            ].copy()
+
+            extended_setups = (
+                extended_setups
+                .sort_values(
+                    by=[
+                        "Distance From Breakout %",
+                        "Winner Score",
+                    ],
+                    ascending=[
+                        False,
+                        False,
+                    ],
+                )
+                .head(25)
+            )
+
+            if not extended_setups.empty:
+                st.dataframe(
+                    extended_setups[
+                        [
+                            "Stock",
+                            "Company",
+                            "Current Pattern",
+                            "Pattern Timeframe",
+                            "Breakout Level",
+                            "Current Price",
+                            "Distance From Breakout %",
+                            "Entry Quality",
+                            "Winner Score",
+                            "RS Status",
+                        ]
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Breakout Level": st.column_config.NumberColumn(
+                            "Breakout Level",
+                            format="₹%.2f",
+                        ),
+                        "Current Price": st.column_config.NumberColumn(
+                            "Current Price",
+                            format="₹%.2f",
+                        ),
+                        "Distance From Breakout %": st.column_config.NumberColumn(
+                            "Distance",
+                            format="%.2f%%",
+                        ),
+                        "Winner Score": st.column_config.ProgressColumn(
+                            "Winner Score",
+                            min_value=0,
+                            max_value=100,
+                            format="%.1f",
+                        ),
+                    },
+                )
+
+            else:
+                st.info(
+                    "No materially extended bullish setups were found."
+                )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # RISK ALERTS
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "🚨 Risk Alerts"
+            )
+
+            risk_alerts = []
+
+            for _, row in command_center_data.iterrows():
+                stock_name = row["Stock"]
+                current_price = safe_number(
+                    row["Current Price"]
+                )
+
+                ma20 = safe_number(
+                    row["MA20"]
+                )
+
+                ma50 = safe_number(
+                    row["MA50"]
+                )
+
+                weekly_trend = row["Weekly Trend"]
+                monthly_trend = row["Monthly Trend"]
+                pattern_direction = row[
+                    "Pattern Direction"
+                ]
+                pattern_status = row[
+                    "Pattern Status"
+                ]
+                risk_reward = safe_number(
+                    row["Risk Reward"]
+                )
+                rs_status = row["RS Status"]
+                winner_score = safe_number(
+                    row["Winner Score"]
+                )
+
+                if (
+                    current_price is not None
+                    and ma20 is not None
+                    and current_price < ma20
+                ):
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Below Daily 20 DMA",
+                            "Details": (
+                                f"Current price {format_price(current_price)} "
+                                f"is below Daily MA20 {format_price(ma20)}."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+                if weekly_trend == "Bearish":
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Weekly Bearish Trend",
+                            "Details": (
+                                "Weekly trend is Bearish."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+                if monthly_trend == "Bearish":
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Monthly Bearish Trend",
+                            "Details": (
+                                "Monthly trend is Bearish."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+                if (
+                    pattern_status == "Confirmed"
+                    and pattern_direction == "Bearish"
+                ):
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Confirmed Bearish Pattern",
+                            "Details": (
+                                f"{row['Current Pattern']} is confirmed "
+                                f"on {row['Pattern Timeframe']}."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+                if rs_status == "Weak":
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Weak Relative Strength",
+                            "Details": (
+                                "Stock is underperforming Nifty 50 "
+                                "over multiple measured periods."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+                if (
+                    risk_reward is not None
+                    and risk_reward < 1.5
+                    and row["Pattern Direction"] == "Bullish"
+                ):
+                    risk_alerts.append(
+                        {
+                            "Stock": stock_name,
+                            "Alert Type": "Weak Risk / Reward",
+                            "Details": (
+                                f"Current rule-based risk/reward is "
+                                f"1 : {risk_reward:.2f}."
+                            ),
+                            "Winner Score": winner_score,
+                        }
+                    )
+
+            if risk_alerts:
+                risk_alert_dataframe = pd.DataFrame(
+                    risk_alerts
+                )
+
+                risk_alert_dataframe = (
+                    risk_alert_dataframe
+                    .sort_values(
+                        by="Winner Score",
+                        ascending=False,
+                    )
+                    .head(50)
+                )
+
+                st.dataframe(
+                    risk_alert_dataframe,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Winner Score": st.column_config.ProgressColumn(
+                            "Winner Score",
+                            min_value=0,
+                            max_value=100,
+                            format="%.1f",
+                        ),
+                    },
+                )
+
+            else:
+                st.success(
+                    "No major rule-based risk alerts were found "
+                    "in the current scanned universe."
+                )
+
+            st.divider()
+
+            # -----------------------------------------------------------------
+            # EXPORT
+            # -----------------------------------------------------------------
+
+            st.subheader(
+                "⬇️ Export Daily Command Center Results"
+            )
+
+            export_data = command_center_data.sort_values(
+                by=[
+                    "Winner Score",
+                    "MTF Score",
+                    "RS 6M %",
+                ],
+                ascending=[
+                    False,
+                    False,
+                    False,
+                ],
+            )
+
+            csv_data = export_data.to_csv(
+                index=False
+            ).encode("utf-8")
+
+            st.download_button(
+                "Download Complete Command Center CSV",
+                data=csv_data,
+                file_name="nifty_daily_command_center.csv",
+                mime="text/csv",
+            )
+
+
+# =============================================================================
+# STOCK RESEARCH
+# =============================================================================
+
+elif dashboard_mode == "Stock Research":
+    st.subheader(
+        "Stock Research"
+    )
+
+    symbols = sorted(
         stock_universe["Symbol"].tolist()
     )
 
-    default_index = (
-        available_symbols.index("RELIANCE")
-        if "RELIANCE" in available_symbols
+    default_symbol_index = (
+        symbols.index("RELIANCE")
+        if "RELIANCE" in symbols
         else 0
     )
 
     selected_symbol = st.selectbox(
-        "Search a Nifty Total Market stock",
-        available_symbols,
-        index=default_index,
+        "Select a Nifty Total Market stock",
+        symbols,
+        index=default_symbol_index,
     )
 
     selected_record = stock_universe[
@@ -3038,11 +4101,9 @@ if dashboard_mode == "Stock research":
     ].iloc[0]
 
     ticker = selected_record["Ticker"]
-    company_name = selected_record["Company Name"]
-    industry = selected_record["Industry"]
 
     with st.spinner(
-        f"Loading market data for {selected_symbol}..."
+        f"Loading research data for {selected_symbol}..."
     ):
         stock_data = fetch_price_data(
             ticker,
@@ -3055,17 +4116,15 @@ if dashboard_mode == "Stock research":
 
     if stock_data.empty:
         st.error(
-            "No price data is available for this symbol."
+            "Price data is unavailable for this stock."
         )
         st.stop()
 
     daily_data = stock_data
-
     weekly_data = resample_ohlcv(
         stock_data,
         "Weekly",
     )
-
     monthly_data = resample_ohlcv(
         stock_data,
         "Monthly",
@@ -3074,11 +4133,9 @@ if dashboard_mode == "Stock research":
     daily_patterns = detect_patterns(
         daily_data
     )
-
     weekly_patterns = detect_patterns(
         weekly_data
     )
-
     monthly_patterns = detect_patterns(
         monthly_data
     )
@@ -3114,35 +4171,26 @@ if dashboard_mode == "Stock research":
         "marketCap"
     )
 
-    market_cap_crore = (
-        safe_number(market_cap, 0)
-        / 10000000
+    header_col1, header_col2, header_col3, header_col4, header_col5 = (
+        st.columns(5)
     )
 
-    (
-        metric_1,
-        metric_2,
-        metric_3,
-        metric_4,
-        metric_5,
-    ) = st.columns(5)
-
-    metric_1.metric(
+    header_col1.metric(
         "Last Close",
         format_price(current_price),
     )
 
-    metric_2.metric(
+    header_col2.metric(
         "Market Cap",
         format_market_cap(market_cap),
     )
 
-    metric_3.metric(
-        "RS vs Nifty 50",
+    header_col3.metric(
+        "RS Status",
         relative_strength["status"],
     )
 
-    metric_4.metric(
+    header_col4.metric(
         "MTF Alignment",
         (
             f"{alignment['score']}/10"
@@ -3151,31 +4199,22 @@ if dashboard_mode == "Stock research":
         ),
     )
 
-    metric_5.metric(
+    header_col5.metric(
         "Winner Score",
         f"{winner_score['score']}/100",
         winner_score["category"],
     )
 
     st.caption(
-        f"{company_name} • {industry}"
+        f"{selected_record['Company Name']} • "
+        f"{selected_record['Industry']}"
     )
-
-    if (
-        market_cap_crore > 0
-        and market_cap_crore < minimum_market_cap
-    ):
-        st.warning(
-            f"{selected_symbol} is below the chosen minimum "
-            f"market cap of ₹{minimum_market_cap:,.0f} Cr."
-        )
 
     (
         winner_tab,
         technical_tab,
-        relative_strength_tab,
+        rs_tab,
         alignment_tab,
-        risk_reward_tab,
         fundamentals_tab,
     ) = st.tabs(
         [
@@ -3183,48 +4222,16 @@ if dashboard_mode == "Stock research":
             "Technical Research",
             "Relative Strength",
             "MTF Alignment",
-            "Risk / Reward Plan",
             "Fundamentals",
         ]
     )
 
-    # =========================================================================
-    # WINNER SCORE TAB
-    # =========================================================================
-
     with winner_tab:
         st.subheader(
-            "Winner Score and Research Ranking"
+            "Winner Score Breakdown"
         )
 
-        score = winner_score["score"]
-
-        if score >= 80:
-            score_card_class = "green-card"
-        elif score >= 65:
-            score_card_class = "blue-card"
-        elif score < 35:
-            score_card_class = "red-card"
-        else:
-            score_card_class = "orange-card"
-
-        st.markdown(
-            f"""
-            <div class="research-card {score_card_class}">
-                <h2>Winner Score: {score}/100</h2>
-                <h3>{winner_score["category"]}</h3>
-                <p>
-                    The score is a research-ranking system that combines
-                    available fundamentals, Relative Strength, price trends,
-                    chart alignment, pattern evidence, volume confirmation
-                    and valuation-risk checks.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        score_dataframe = pd.DataFrame(
+        breakdown = pd.DataFrame(
             [
                 [
                     "Fundamental Quality",
@@ -3240,67 +4247,47 @@ if dashboard_mode == "Stock research":
                 ],
                 [
                     "Multi-Timeframe Alignment",
-                    winner_score[
-                        "alignment_score"
-                    ],
+                    winner_score["alignment_score"],
                     20,
                 ],
                 [
                     "Technical Trend",
-                    winner_score[
-                        "technical_score"
-                    ],
+                    winner_score["technical_score"],
                     15,
                 ],
                 [
-                    "Pattern / Breakout Quality",
-                    winner_score[
-                        "pattern_score"
-                    ],
+                    "Pattern Quality",
+                    winner_score["pattern_score"],
                     15,
                 ],
                 [
                     "Volume Confirmation",
-                    winner_score[
-                        "volume_score"
-                    ],
+                    winner_score["volume_score"],
                     5,
                 ],
                 [
                     "Valuation / Risk",
-                    winner_score[
-                        "valuation_score"
-                    ],
+                    winner_score["valuation_score"],
                     5,
                 ],
             ],
             columns=[
-                "Score Component",
-                "Points Earned",
-                "Maximum Points",
+                "Component",
+                "Points",
+                "Maximum",
             ],
         )
 
-        score_dataframe["Strength %"] = (
-            score_dataframe["Points Earned"]
-            / score_dataframe["Maximum Points"]
+        breakdown["Strength %"] = (
+            breakdown["Points"]
+            / breakdown["Maximum"]
         ) * 100
 
-        st.markdown("### Score Breakdown")
-
         st.dataframe(
-            score_dataframe,
+            breakdown,
             hide_index=True,
             use_container_width=True,
             column_config={
-                "Points Earned": st.column_config.NumberColumn(
-                    "Points",
-                    format="%.1f",
-                ),
-                "Maximum Points": st.column_config.NumberColumn(
-                    "Maximum",
-                    format="%.0f",
-                ),
                 "Strength %": st.column_config.ProgressColumn(
                     "Component Strength",
                     min_value=0,
@@ -3310,33 +4297,21 @@ if dashboard_mode == "Stock research":
             },
         )
 
-        evidence_col, risk_col = st.columns(2)
+        reason_col, risk_col = st.columns(2)
 
-        with evidence_col:
+        with reason_col:
             st.markdown("### Positive Evidence")
 
             if winner_score["positives"]:
-                for evidence in winner_score["positives"][:20]:
-                    st.success(f"✅ {evidence}")
-            else:
-                st.info(
-                    "No positive evidence is currently available."
-                )
+                for item in winner_score["positives"][:15]:
+                    st.success(f"✅ {item}")
 
         with risk_col:
             st.markdown("### Risk Flags")
 
             if winner_score["risks"]:
-                for risk in winner_score["risks"][:20]:
-                    st.warning(f"⚠️ {risk}")
-            else:
-                st.success(
-                    "No major rule-based risk flags were detected."
-                )
-
-    # =========================================================================
-    # TECHNICAL RESEARCH TAB
-    # =========================================================================
+                for item in winner_score["risks"][:15]:
+                    st.warning(f"⚠️ {item}")
 
     with technical_tab:
         daily_tab, weekly_tab, monthly_tab = st.tabs(
@@ -3347,7 +4322,7 @@ if dashboard_mode == "Stock research":
             ]
         )
 
-        timeframe_configuration = [
+        technical_views = [
             (
                 daily_tab,
                 "Daily",
@@ -3368,16 +4343,11 @@ if dashboard_mode == "Stock research":
             ),
         ]
 
-        for (
-            tab,
-            timeframe_name,
-            timeframe_data,
-            patterns,
-        ) in timeframe_configuration:
+        for tab, name, data, patterns in technical_views:
             with tab:
                 support, resistance = (
                     calculate_support_resistance(
-                        timeframe_data
+                        data
                     )
                 )
 
@@ -3386,110 +4356,63 @@ if dashboard_mode == "Stock research":
                 )
 
                 trend_col.metric(
-                    "Overall Trend",
-                    calculate_overall_trend(
-                        timeframe_data
-                    ),
+                    "Trend",
+                    calculate_overall_trend(data),
                 )
 
                 support_col.metric(
-                    "Nearest Support",
+                    "Support",
                     format_price(support),
                 )
 
                 resistance_col.metric(
-                    "Nearest Resistance",
+                    "Resistance",
                     format_price(resistance),
                 )
 
-                st.subheader(
-                    f"{timeframe_name} Pattern Status"
-                )
-
                 if patterns:
-                    patterns_dataframe = pd.DataFrame(
-                        patterns
-                    )
-
                     st.dataframe(
-                        patterns_dataframe,
+                        pd.DataFrame(patterns),
                         hide_index=True,
                         use_container_width=True,
-                        column_config={
-                            "Date": st.column_config.DatetimeColumn(
-                                "Signal Date",
-                                format="YYYY-MM-DD",
-                            ),
-                            "Level": st.column_config.NumberColumn(
-                                "Breakout / Neckline",
-                                format="₹%.2f",
-                            ),
-                            "Current": st.column_config.NumberColumn(
-                                "Current Price",
-                                format="₹%.2f",
-                            ),
-                            "Return %": st.column_config.NumberColumn(
-                                "Return Since Level",
-                                format="%.2f%%",
-                            ),
-                            "Volume %": st.column_config.NumberColumn(
-                                "Volume vs Average",
-                                format="%.1f%%",
-                            ),
-                            "Pattern Height": st.column_config.NumberColumn(
-                                "Pattern Height",
-                                format="₹%.2f",
-                            ),
-                        },
                     )
-
                 else:
                     st.info(
-                        "No supported active technical pattern was detected."
+                        "No supported technical patterns currently detected."
                     )
 
                 st.plotly_chart(
                     create_candlestick_chart(
-                        timeframe_data,
+                        data,
                         patterns,
-                        f"{selected_symbol} — {timeframe_name}",
+                        f"{selected_symbol} — {name}",
                     ),
                     use_container_width=True,
                 )
 
-    # =========================================================================
-    # RELATIVE STRENGTH TAB
-    # =========================================================================
-
-    with relative_strength_tab:
+    with rs_tab:
         st.subheader(
-            "Relative Strength versus Nifty 50"
+            "Relative Strength vs Nifty 50"
         )
 
-        st.caption(
-            "Relative Return = Stock Return − Nifty 50 Return. "
-            "Positive Relative Return indicates that the stock "
-            "outperformed Nifty 50 over the same period."
-        )
+        rs_col1, rs_col2, rs_col3 = st.columns(3)
 
-        rs_col_1, rs_col_2, rs_col_3 = st.columns(3)
-
-        rs_col_1.metric(
+        rs_col1.metric(
             "RS Status",
             relative_strength["status"],
         )
 
-        rs_col_2.metric(
-            "RS Line Trend",
+        rs_col2.metric(
+            "RS Trend",
             relative_strength["rs_trend"],
         )
 
-        rs_col_3.metric(
+        rs_col3.metric(
             "Benchmark",
             "Nifty 50 (^NSEI)",
         )
 
-        rs_dataframe = pd.DataFrame(
+        rs_table = pd.DataFrame(
             [
                 [
                     "1 Month",
@@ -3525,72 +4448,44 @@ if dashboard_mode == "Stock research":
         )
 
         st.dataframe(
-            rs_dataframe,
+            rs_table,
             hide_index=True,
             use_container_width=True,
-            column_config={
-                "Stock Return %": st.column_config.NumberColumn(
-                    "Stock Return",
-                    format="%.2f%%",
-                ),
-                "Nifty 50 Return %": st.column_config.NumberColumn(
-                    "Nifty 50 Return",
-                    format="%.2f%%",
-                ),
-                "Relative Return %": st.column_config.NumberColumn(
-                    "Relative Return",
-                    format="%.2f%%",
-                ),
-            },
         )
 
-        if (
-            relative_strength["rs_line"] is not None
-            and not relative_strength["rs_line"].empty
-        ):
-            st.plotly_chart(
-                create_relative_strength_chart(
-                    relative_strength["rs_line"],
-                    selected_symbol,
-                ),
-                use_container_width=True,
-            )
-
-        else:
-            st.info(
-                "There is insufficient aligned price history "
-                "to draw the Relative Strength line."
-            )
-
-    # =========================================================================
-    # MULTI-TIMEFRAME ALIGNMENT TAB
-    # =========================================================================
+        st.plotly_chart(
+            create_relative_strength_chart(
+                relative_strength["rs_line"],
+                selected_symbol,
+            ),
+            use_container_width=True,
+        )
 
     with alignment_tab:
         st.subheader(
-            "Daily, Weekly and Monthly Alignment"
+            "Multi-Timeframe Alignment"
         )
 
         daily_col, weekly_col, monthly_col = st.columns(3)
 
         daily_col.metric(
-            "Daily Trend",
+            "Daily",
             alignment["daily"],
         )
 
         weekly_col.metric(
-            "Weekly Trend",
+            "Weekly",
             alignment["weekly"],
         )
 
         monthly_col.metric(
-            "Monthly Trend",
+            "Monthly",
             alignment["monthly"],
         )
 
-        alignment_col, structure_col = st.columns(2)
+        score_col, status_col = st.columns(2)
 
-        alignment_col.metric(
+        score_col.metric(
             "Alignment Score",
             (
                 f"{alignment['score']}/10"
@@ -3599,379 +4494,18 @@ if dashboard_mode == "Stock research":
             ),
         )
 
-        structure_col.metric(
+        status_col.metric(
             "Alignment Status",
             alignment["status"],
         )
 
-        st.markdown(
-            f"""
-            <div class="research-card">
-                <h4>Market Structure</h4>
-                <p>{alignment["structure"]}</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.info(
+            alignment["structure"]
         )
-
-        st.markdown(
-            """
-            | Timeframe | Strong Bullish | Bullish | Neutral | Bearish |
-            |---|---:|---:|---:|---:|
-            | Daily | 3 | 2 | 1 | 0 |
-            | Weekly | 4 | 3 | 1 | 0 |
-            | Monthly | 3 | 2 | 1 | 0 |
-            """
-        )
-
-    # =========================================================================
-    # RISK / REWARD TAB
-    # =========================================================================
-
-    with risk_reward_tab:
-        st.subheader(
-            "Risk / Reward and Position Sizing Research"
-        )
-
-        st.caption(
-            "These levels are rule-based educational calculations. "
-            "They are not an instruction to buy, sell, enter, exit, "
-            "or allocate capital to any security."
-        )
-
-        timeframe_for_plan = st.selectbox(
-            "Select chart timeframe for trade-plan analysis",
-            [
-                "Daily",
-                "Weekly",
-                "Monthly",
-            ],
-        )
-
-        if timeframe_for_plan == "Daily":
-            plan_data = daily_data
-            plan_patterns = daily_patterns
-
-        elif timeframe_for_plan == "Weekly":
-            plan_data = weekly_data
-            plan_patterns = weekly_patterns
-
-        else:
-            plan_data = monthly_data
-            plan_patterns = monthly_patterns
-
-        bullish_patterns = [
-            pattern
-            for pattern in plan_patterns
-            if pattern.get("Direction") == "Bullish"
-        ]
-
-        bearish_patterns = [
-            pattern
-            for pattern in plan_patterns
-            if pattern.get("Direction") == "Bearish"
-        ]
-
-        available_patterns = bullish_patterns + bearish_patterns
-
-        if available_patterns:
-            pattern_labels = []
-
-            for index, pattern in enumerate(
-                available_patterns
-            ):
-                label = (
-                    f"{index + 1}. "
-                    f"{pattern['Pattern']} | "
-                    f"{pattern['Status']} | "
-                    f"{pattern['Direction']}"
-                )
-
-                pattern_labels.append(label)
-
-            selected_pattern_label = st.selectbox(
-                "Select a detected pattern",
-                pattern_labels,
-            )
-
-            selected_pattern_index = pattern_labels.index(
-                selected_pattern_label
-            )
-
-            selected_pattern = available_patterns[
-                selected_pattern_index
-            ]
-
-            trade_plan = calculate_trade_plan(
-                plan_data,
-                selected_pattern,
-            )
-
-            if trade_plan is not None:
-                entry_status = trade_plan[
-                    "entry_quality"
-                ]["status"]
-
-                if entry_status == "Ideal Entry Zone":
-                    entry_card_class = "green-card"
-
-                elif entry_status == "Acceptable Entry Zone":
-                    entry_card_class = "blue-card"
-
-                elif entry_status in [
-                    "Extended",
-                    "Avoid Chasing",
-                ]:
-                    entry_card_class = "orange-card"
-
-                else:
-                    entry_card_class = "red-card"
-
-                st.markdown(
-                    f"""
-                    <div class="research-card {entry_card_class}">
-                        <h3>{selected_pattern["Pattern"]}</h3>
-                        <p>
-                            Status: {selected_pattern["Status"]} |
-                            Direction: {selected_pattern["Direction"]}
-                        </p>
-                        <h4>Entry Quality: {entry_status}</h4>
-                        <p>
-                            {trade_plan["entry_quality"]["notes"]}
-                        </p>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                (
-                    plan_col_1,
-                    plan_col_2,
-                    plan_col_3,
-                    plan_col_4,
-                ) = st.columns(4)
-
-                plan_col_1.metric(
-                    "Current Price",
-                    format_price(
-                        trade_plan["current_price"]
-                    ),
-                )
-
-                plan_col_2.metric(
-                    "Breakout / Neckline",
-                    format_price(
-                        trade_plan["breakout_level"]
-                    ),
-                )
-
-                plan_col_3.metric(
-                    "14-Period ATR",
-                    format_price(
-                        trade_plan["atr"]
-                    ),
-                )
-
-                plan_col_4.metric(
-                    "Entry Distance",
-                    format_percent(
-                        trade_plan[
-                            "entry_quality"
-                        ]["distance_percent"]
-                    ),
-                )
-
-                (
-                    stop_col_1,
-                    stop_col_2,
-                    stop_col_3,
-                    stop_col_4,
-                ) = st.columns(4)
-
-                stop_col_1.metric(
-                    "Nearest Support",
-                    format_price(
-                        trade_plan["support"]
-                    ),
-                )
-
-                stop_col_2.metric(
-                    "Technical Stop",
-                    format_price(
-                        trade_plan["technical_stop"]
-                    ),
-                )
-
-                stop_col_3.metric(
-                    "ATR Stop",
-                    format_price(
-                        trade_plan["atr_stop"]
-                    ),
-                )
-
-                stop_col_4.metric(
-                    "Selected Stop",
-                    format_price(
-                        trade_plan["selected_stop"]
-                    ),
-                )
-
-                (
-                    reward_col_1,
-                    reward_col_2,
-                    reward_col_3,
-                    reward_col_4,
-                ) = st.columns(4)
-
-                reward_col_1.metric(
-                    "Pattern Target",
-                    format_price(
-                        trade_plan["target"]
-                    ),
-                )
-
-                reward_col_2.metric(
-                    "Risk per Share",
-                    format_price(
-                        trade_plan["risk_per_share"]
-                    ),
-                )
-
-                reward_col_3.metric(
-                    "Reward per Share",
-                    format_price(
-                        trade_plan["reward_per_share"]
-                    ),
-                )
-
-                reward_ratio = trade_plan[
-                    "risk_reward_ratio"
-                ]
-
-                reward_col_4.metric(
-                    "Risk / Reward",
-                    (
-                        f"1 : {reward_ratio:.2f}"
-                        if reward_ratio is not None
-                        else "Not available"
-                    ),
-                    trade_plan[
-                        "risk_reward_status"
-                    ],
-                )
-
-                st.divider()
-
-                st.subheader(
-                    "Position Sizing Calculator"
-                )
-
-                input_col_1, input_col_2 = st.columns(2)
-
-                with input_col_1:
-                    portfolio_value = st.number_input(
-                        "Portfolio value (₹)",
-                        min_value=10000.0,
-                        value=1000000.0,
-                        step=50000.0,
-                    )
-
-                with input_col_2:
-                    risk_per_trade = st.slider(
-                        "Maximum risk per trade (%)",
-                        min_value=0.25,
-                        max_value=5.00,
-                        value=1.00,
-                        step=0.25,
-                    )
-
-                position_size = calculate_position_size(
-                    portfolio_value=portfolio_value,
-                    risk_percent=risk_per_trade,
-                    entry_price=trade_plan[
-                        "current_price"
-                    ],
-                    stop_loss=trade_plan[
-                        "selected_stop"
-                    ],
-                )
-
-                if position_size is not None:
-                    (
-                        size_col_1,
-                        size_col_2,
-                        size_col_3,
-                        size_col_4,
-                    ) = st.columns(4)
-
-                    size_col_1.metric(
-                        "Maximum Allowed Loss",
-                        format_price(
-                            position_size[
-                                "maximum_allowed_loss"
-                            ]
-                        ),
-                    )
-
-                    size_col_2.metric(
-                        "Risk per Share",
-                        format_price(
-                            position_size[
-                                "risk_per_share"
-                            ]
-                        ),
-                    )
-
-                    size_col_3.metric(
-                        "Maximum Quantity",
-                        f"{position_size['maximum_quantity']:,} shares",
-                    )
-
-                    size_col_4.metric(
-                        "Approx. Position Value",
-                        format_price(
-                            position_size[
-                                "position_value"
-                            ]
-                        ),
-                    )
-
-                    st.caption(
-                        "Approximate portfolio allocation: "
-                        f"{position_size['portfolio_allocation_percent']:.2f}%"
-                    )
-
-                    if (
-                        position_size[
-                            "portfolio_allocation_percent"
-                        ] > 25
-                    ):
-                        st.warning(
-                            "The calculated position is more than 25% "
-                            "of the specified portfolio. Consider a "
-                            "separate maximum-position-size rule."
-                        )
-
-                else:
-                    st.info(
-                        "A position-size calculation requires a valid "
-                        "current price and selected stop-loss."
-                    )
-
-        else:
-            st.info(
-                "No bullish or bearish detected pattern is currently "
-                "available for the selected timeframe. "
-                "A risk/reward plan requires a directional setup."
-            )
-
-    # =========================================================================
-    # FUNDAMENTALS TAB
-    # =========================================================================
 
     with fundamentals_tab:
         st.subheader(
-            "Basic Fundamental Metrics"
+            "Available Fundamental Metrics"
         )
 
         roe = safe_number(
@@ -4006,13 +4540,7 @@ if dashboard_mode == "Stock research":
             fundamentals.get("freeCashflow")
         )
 
-        free_cashflow_text = (
-            f"₹{free_cashflow / 10000000:,.0f} Cr"
-            if free_cashflow is not None
-            else "Not available"
-        )
-
-        fundamentals_dataframe = pd.DataFrame(
+        financial_table = pd.DataFrame(
             [
                 [
                     "Sector",
@@ -4030,26 +4558,23 @@ if dashboard_mode == "Stock research":
                 ],
                 [
                     "Trailing P/E",
-                    safe_number(
-                        fundamentals.get(
-                            "trailingPE"
-                        )
+                    fundamentals.get(
+                        "trailingPE",
+                        "Not available",
                     ),
                 ],
                 [
                     "Forward P/E",
-                    safe_number(
-                        fundamentals.get(
-                            "forwardPE"
-                        )
+                    fundamentals.get(
+                        "forwardPE",
+                        "Not available",
                     ),
                 ],
                 [
                     "Price / Book",
-                    safe_number(
-                        fundamentals.get(
-                            "priceToBook"
-                        )
+                    fundamentals.get(
+                        "priceToBook",
+                        "Not available",
                     ),
                 ],
                 [
@@ -4102,23 +4627,25 @@ if dashboard_mode == "Stock research":
                 ],
                 [
                     "Debt / Equity",
-                    safe_number(
-                        fundamentals.get(
-                            "debtToEquity"
-                        )
+                    fundamentals.get(
+                        "debtToEquity",
+                        "Not available",
                     ),
                 ],
                 [
                     "Current Ratio",
-                    safe_number(
-                        fundamentals.get(
-                            "currentRatio"
-                        )
+                    fundamentals.get(
+                        "currentRatio",
+                        "Not available",
                     ),
                 ],
                 [
                     "Free Cash Flow",
-                    free_cashflow_text,
+                    (
+                        f"₹{free_cashflow / 10000000:,.0f} Cr"
+                        if free_cashflow is not None
+                        else "Not available"
+                    ),
                 ],
                 [
                     "Dividend Yield",
@@ -4136,16 +4663,9 @@ if dashboard_mode == "Stock research":
         )
 
         st.dataframe(
-            fundamentals_dataframe,
+            financial_table,
             hide_index=True,
             use_container_width=True,
-        )
-
-        st.info(
-            "The current Winner Score uses available Yahoo Finance "
-            "fundamental data. Detailed annual/quarterly evidence, "
-            "sector-specific operational KPIs, ownership trends and "
-            "promoter pledge analysis should be added in later versions."
         )
 
 
@@ -4159,20 +4679,19 @@ else:
     )
 
     st.caption(
-        "Ranks Nifty Total Market stocks using Relative Strength, "
-        "multi-timeframe alignment, technical structure, available "
-        "fundamental quality, volume confirmation and valuation-risk checks."
+        "Rank stocks using Winner Score, Relative Strength, trend alignment, "
+        "technical pattern status, breakout quality and market-cap filters."
     )
 
-    scanner_col_1, scanner_col_2, scanner_col_3 = st.columns(3)
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
 
-    with scanner_col_1:
-        scanner_pattern = st.selectbox(
+    with filter_col1:
+        selected_pattern = st.selectbox(
             "Pattern",
             PATTERN_OPTIONS,
         )
 
-        scanner_timeframe = st.selectbox(
+        selected_timeframe = st.selectbox(
             "Pattern Timeframe",
             [
                 "Any",
@@ -4182,7 +4701,7 @@ else:
             ],
         )
 
-        scanner_pattern_status = st.selectbox(
+        selected_pattern_status = st.selectbox(
             "Pattern Status",
             [
                 "Any",
@@ -4192,24 +4711,24 @@ else:
             ],
         )
 
-    with scanner_col_2:
-        scanner_trend = st.selectbox(
+    with filter_col2:
+        selected_trend = st.selectbox(
             "Overall Trend",
             TREND_OPTIONS,
         )
 
-        scanner_rs_status = st.selectbox(
-            "Relative Strength Status",
+        selected_rs_status = st.selectbox(
+            "Relative Strength",
             RS_STATUS_OPTIONS,
         )
 
-        scanner_alignment_status = st.selectbox(
+        selected_alignment = st.selectbox(
             "MTF Alignment",
             MTF_ALIGNMENT_OPTIONS,
         )
 
-    with scanner_col_3:
-        scanner_min_winner_score = st.slider(
+    with filter_col3:
+        minimum_winner_score = st.slider(
             "Minimum Winner Score",
             min_value=0,
             max_value=100,
@@ -4217,13 +4736,13 @@ else:
             step=5,
         )
 
-        scanner_winner_category = st.selectbox(
+        selected_category = st.selectbox(
             "Winner Category",
             WINNER_CATEGORY_OPTIONS,
         )
 
-        scan_limit = st.selectbox(
-            "Maximum Stocks to Scan",
+        scanner_limit = st.selectbox(
+            "Stocks to Scan",
             [
                 50,
                 100,
@@ -4235,302 +4754,90 @@ else:
         )
 
     st.warning(
-        "Free Streamlit Cloud may take several minutes for a wide scan. "
-        "Start with 50 or 100 stocks. Use 750 only after confirming "
-        "that the app runs successfully."
+        "Start with 50 or 100 stocks on free Streamlit Cloud. "
+        "A 750-stock scan can take several minutes."
     )
 
     if st.button(
         "🏆 Run Winner Ranking Scan",
         type="primary",
     ):
-        scan_results = []
-
-        if scanner_timeframe == "Any":
-            timeframes_to_scan = [
-                "Daily",
-                "Weekly",
-                "Monthly",
-            ]
-        else:
-            timeframes_to_scan = [
-                scanner_timeframe
-            ]
-
-        scan_universe = stock_universe.head(
-            scan_limit
-        ).copy()
-
-        progress = st.progress(0)
-        progress_text = st.empty()
-
-        total_stocks = len(scan_universe)
-
-        for row_number, (_, stock_record) in enumerate(
-            scan_universe.iterrows(),
-            start=1,
+        with st.spinner(
+            "Running Winner Ranking scan..."
         ):
-            symbol = stock_record["Symbol"]
-            ticker = stock_record["Ticker"]
-
-            progress_text.caption(
-                f"Scanning {row_number:,} of {total_stocks:,}: "
-                f"{symbol}"
+            scanner_data = run_command_center_scan(
+                universe_data=stock_universe,
+                benchmark_data=nifty_50_data,
+                minimum_market_cap=minimum_market_cap,
+                scan_limit=scanner_limit,
             )
 
-            try:
-                stock_data = fetch_price_data(
-                    ticker,
-                    "5y",
-                )
-
-                if stock_data.empty:
-                    continue
-
-                fundamentals = fetch_fundamentals(
-                    ticker
-                )
-
-                market_cap_crore = (
-                    safe_number(
-                        fundamentals.get("marketCap"),
-                        0,
-                    )
-                    / 10000000
-                )
-
-                if market_cap_crore < minimum_market_cap:
-                    continue
-
-                daily_data = stock_data
-
-                weekly_data = resample_ohlcv(
-                    stock_data,
-                    "Weekly",
-                )
-
-                monthly_data = resample_ohlcv(
-                    stock_data,
-                    "Monthly",
-                )
-
-                daily_patterns = detect_patterns(
-                    daily_data
-                )
-
-                weekly_patterns = detect_patterns(
-                    weekly_data
-                )
-
-                monthly_patterns = detect_patterns(
-                    monthly_data
-                )
-
-                relative_strength = calculate_relative_strength(
-                    stock_data,
-                    nifty_50_data,
-                )
-
-                alignment = (
-                    calculate_multitimeframe_alignment(
-                        daily_data,
-                        weekly_data,
-                        monthly_data,
-                    )
-                )
-
-                winner_score = calculate_winner_score(
-                    fundamentals=fundamentals,
-                    relative_strength=relative_strength,
-                    alignment=alignment,
-                    daily_data=daily_data,
-                    weekly_data=weekly_data,
-                    monthly_data=monthly_data,
-                    daily_patterns=daily_patterns,
-                    weekly_patterns=weekly_patterns,
-                    monthly_patterns=monthly_patterns,
-                )
-
-                if (
-                    winner_score["score"]
-                    < scanner_min_winner_score
-                ):
-                    continue
-
-                if (
-                    scanner_winner_category != "Any"
-                    and winner_score["category"]
-                    != scanner_winner_category
-                ):
-                    continue
-
-                if (
-                    scanner_rs_status != "Any"
-                    and relative_strength["status"]
-                    != scanner_rs_status
-                ):
-                    continue
-
-                if (
-                    scanner_alignment_status != "Any"
-                    and alignment["status"]
-                    != scanner_alignment_status
-                ):
-                    continue
-
-                timeframe_mapping = {
-                    "Daily": (
-                        daily_data,
-                        daily_patterns,
-                    ),
-                    "Weekly": (
-                        weekly_data,
-                        weekly_patterns,
-                    ),
-                    "Monthly": (
-                        monthly_data,
-                        monthly_patterns,
-                    ),
-                }
-
-                matches = []
-
-                for timeframe in timeframes_to_scan:
-                    timeframe_data, timeframe_patterns = (
-                        timeframe_mapping[timeframe]
-                    )
-
-                    timeframe_trend = calculate_overall_trend(
-                        timeframe_data
-                    )
-
-                    if (
-                        scanner_trend != "Any"
-                        and timeframe_trend != scanner_trend
-                    ):
-                        continue
-
-                    for signal in timeframe_patterns:
-                        pattern_match = (
-                            scanner_pattern == "Any"
-                            or signal["Pattern"]
-                            == scanner_pattern
-                        )
-
-                        status_match = (
-                            scanner_pattern_status == "Any"
-                            or signal["Status"]
-                            == scanner_pattern_status
-                        )
-
-                        if pattern_match and status_match:
-                            matches.append(
-                                {
-                                    "Timeframe": timeframe,
-                                    "Overall Trend": timeframe_trend,
-                                    **signal,
-                                }
-                            )
-
-                if (
-                    scanner_pattern != "Any"
-                    and not matches
-                ):
-                    continue
-
-                if not matches:
-                    matches = [
-                        {
-                            "Timeframe": "Overall",
-                            "Overall Trend": calculate_overall_trend(
-                                daily_data
-                            ),
-                            "Pattern": "No active pattern",
-                            "Status": "No Pattern",
-                            "Direction": "Neutral",
-                            "Date": stock_data.index[-1],
-                            "Level": np.nan,
-                            "Current": float(
-                                stock_data["close"].iloc[-1]
-                            ),
-                            "Return %": np.nan,
-                            "Volume %": np.nan,
-                            "Pattern Height": np.nan,
-                            "Notes": (
-                                "Ranked by Winner Score. "
-                                "No supported active pattern found."
-                            ),
-                        }
-                    ]
-
-                for match in matches:
-                    scan_results.append(
-                        {
-                            "Stock": symbol,
-                            "Company": stock_record[
-                                "Company Name"
-                            ],
-                            "Industry": stock_record[
-                                "Industry"
-                            ],
-                            "Market Cap (Cr)": round(
-                                market_cap_crore,
-                                0,
-                            ),
-                            "Winner Score": winner_score[
-                                "score"
-                            ],
-                            "Winner Category": winner_score[
-                                "category"
-                            ],
-                            "Fundamental Score": winner_score[
-                                "fundamental_score"
-                            ],
-                            "RS Score": winner_score[
-                                "relative_strength_score"
-                            ],
-                            "RS Status": relative_strength[
-                                "status"
-                            ],
-                            "RS Trend": relative_strength[
-                                "rs_trend"
-                            ],
-                            "RS 3M %": relative_strength[
-                                "relative_3m"
-                            ],
-                            "RS 6M %": relative_strength[
-                                "relative_6m"
-                            ],
-                            "MTF Score": alignment[
-                                "score"
-                            ],
-                            "MTF Alignment": alignment[
-                                "status"
-                            ],
-                            **match,
-                        }
-                    )
-
-            except Exception:
-                pass
-
-            progress.progress(
-                row_number / total_stocks
+        if scanner_data.empty:
+            st.warning(
+                "No eligible stocks were found."
             )
 
-        progress.empty()
-        progress_text.empty()
+        else:
+            filtered_data = scanner_data.copy()
 
-        st.subheader(
-            f"Winner Ranking Results: {len(scan_results)}"
-        )
+            filtered_data = filtered_data[
+                filtered_data["Winner Score"]
+                >= minimum_winner_score
+            ]
 
-        if scan_results:
-            results_dataframe = pd.DataFrame(
-                scan_results
-            )
+            if selected_category != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["Winner Category"]
+                    == selected_category
+                ]
 
-            results_dataframe = results_dataframe.sort_values(
+            if selected_rs_status != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["RS Status"]
+                    == selected_rs_status
+                ]
+
+            if selected_alignment != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["MTF Alignment"]
+                    == selected_alignment
+                ]
+
+            if selected_pattern != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["Current Pattern"]
+                    == selected_pattern
+                ]
+
+            if selected_pattern_status != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["Pattern Status"]
+                    == selected_pattern_status
+                ]
+
+            if selected_timeframe != "Any":
+                filtered_data = filtered_data[
+                    filtered_data["Pattern Timeframe"]
+                    == selected_timeframe
+                ]
+
+            if selected_trend != "Any":
+                filtered_data = filtered_data[
+                    (
+                        filtered_data["Daily Trend"]
+                        == selected_trend
+                    )
+                    | (
+                        filtered_data["Weekly Trend"]
+                        == selected_trend
+                    )
+                    | (
+                        filtered_data["Monthly Trend"]
+                        == selected_trend
+                    )
+                ]
+
+            filtered_data = filtered_data.sort_values(
                 by=[
                     "Winner Score",
                     "MTF Score",
@@ -4543,53 +4850,34 @@ else:
                 ],
             )
 
-            result_metric_1, result_metric_2, result_metric_3, result_metric_4 = (
-                st.columns(4)
-            )
-
-            result_metric_1.metric(
-                "Ranked Results",
-                len(results_dataframe),
-            )
-
-            result_metric_2.metric(
-                "Elite Candidates",
-                int(
-                    (
-                        results_dataframe[
-                            "Winner Category"
-                        ]
-                        == "Elite Candidate"
-                    ).sum()
-                ),
-            )
-
-            result_metric_3.metric(
-                "High-Conviction",
-                int(
-                    (
-                        results_dataframe[
-                            "Winner Category"
-                        ]
-                        == "High-Conviction Watchlist"
-                    ).sum()
-                ),
-            )
-
-            result_metric_4.metric(
-                "RS Leaders",
-                int(
-                    (
-                        results_dataframe[
-                            "RS Status"
-                        ]
-                        == "Leader"
-                    ).sum()
-                ),
+            st.subheader(
+                f"Ranked Results: {len(filtered_data)}"
             )
 
             st.dataframe(
-                results_dataframe,
+                filtered_data[
+                    [
+                        "Stock",
+                        "Company",
+                        "Industry",
+                        "Market Cap (Cr)",
+                        "Winner Score",
+                        "Winner Category",
+                        "RS Status",
+                        "RS 3M %",
+                        "RS 6M %",
+                        "MTF Score",
+                        "MTF Alignment",
+                        "Daily Trend",
+                        "Weekly Trend",
+                        "Monthly Trend",
+                        "Current Pattern",
+                        "Pattern Status",
+                        "Pattern Timeframe",
+                        "Entry Quality",
+                        "Risk Reward",
+                    ]
+                ],
                 hide_index=True,
                 use_container_width=True,
                 column_config={
@@ -4611,25 +4899,9 @@ else:
                         "RS 6M",
                         format="%.2f%%",
                     ),
-                    "Date": st.column_config.DatetimeColumn(
-                        "Signal Date",
-                        format="YYYY-MM-DD",
-                    ),
-                    "Level": st.column_config.NumberColumn(
-                        "Breakout / Neckline",
-                        format="₹%.2f",
-                    ),
-                    "Current": st.column_config.NumberColumn(
-                        "Current Price",
-                        format="₹%.2f",
-                    ),
-                    "Return %": st.column_config.NumberColumn(
-                        "Return Since Level",
-                        format="%.2f%%",
-                    ),
-                    "Volume %": st.column_config.NumberColumn(
-                        "Volume vs Average",
-                        format="%.1f%%",
+                    "Risk Reward": st.column_config.NumberColumn(
+                        "Risk / Reward",
+                        format="1 : %.2f",
                     ),
                     "Market Cap (Cr)": st.column_config.NumberColumn(
                         "Market Cap",
@@ -4638,22 +4910,15 @@ else:
                 },
             )
 
-            csv_data = results_dataframe.to_csv(
+            csv_data = filtered_data.to_csv(
                 index=False
             ).encode("utf-8")
 
             st.download_button(
-                "⬇️ Download Winner Ranking Results",
+                "⬇️ Download Winner Ranking CSV",
                 data=csv_data,
-                file_name="nifty_total_market_winner_ranking.csv",
+                file_name="nifty_winner_ranking.csv",
                 mime="text/csv",
-            )
-
-        else:
-            st.info(
-                "No stocks matched your selected Winner Score, "
-                "pattern, trend, Relative Strength, alignment, "
-                "market-cap, or category filters."
             )
 
 
@@ -4664,9 +4929,10 @@ else:
 st.divider()
 
 st.caption(
-    "Data sources: Nifty Indices constituent data and Yahoo Finance. "
-    "Risk/reward levels, ATR stops, pattern targets, position sizing, "
-    "technical patterns, Winner Scores and rankings are rule-based "
-    "research calculations. They are not investment advice, buy/sell "
-    "recommendations, or guaranteed outcomes. Verify all data independently."
+    "Data sources: Nifty Indices constituent list and Yahoo Finance. "
+    "The Command Center, Winner Score, technical patterns, breadth, "
+    "relative strength, risk/reward levels and risk alerts are rule-based "
+    "research tools. They may be incomplete, delayed, or produce false "
+    "positives. This dashboard is for education and research only and is "
+    "not investment advice."
 )

@@ -994,6 +994,73 @@ def find_pivots(values, pivot_type="high", order=3):
 
     return output
 
+def calculate_support_resistance(data):
+    """Calculate approximate support and resistance from recent pivots."""
+
+    if data is None or data.empty:
+        return None, None
+
+    if len(data) < 30:
+        support = float(
+            data["low"].tail(10).min()
+        )
+
+        resistance = float(
+            data["high"].tail(10).max()
+        )
+
+        return support, resistance
+
+    current_price = float(
+        data["close"].iloc[-1]
+    )
+
+    low_values = data["low"].to_numpy(
+        dtype=float
+    )
+
+    high_values = data["high"].to_numpy(
+        dtype=float
+    )
+
+    low_pivots = find_pivots(
+        low_values,
+        pivot_type="low",
+        order=3,
+    )
+
+    high_pivots = find_pivots(
+        high_values,
+        pivot_type="high",
+        order=3,
+    )
+
+    support_candidates = [
+        float(data["low"].iloc[index])
+        for index in low_pivots
+        if data["low"].iloc[index] < current_price
+    ]
+
+    resistance_candidates = [
+        float(data["high"].iloc[index])
+        for index in high_pivots
+        if data["high"].iloc[index] > current_price
+    ]
+
+    support = (
+        max(support_candidates[-8:])
+        if support_candidates
+        else float(data["low"].tail(20).min())
+    )
+
+    resistance = (
+        min(resistance_candidates[-8:])
+        if resistance_candidates
+        else float(data["high"].tail(20).max())
+    )
+
+    return support, resistance
+
 
 def build_pattern_signal(
     pattern,

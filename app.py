@@ -320,6 +320,20 @@ def get_market_status():
     }
 
 
+def next_business_day_estimate(current_date):
+    """
+    Estimate next NSE trading day using pandas BusinessDay.
+
+    This handles weekends but not NSE-specific holidays.
+    A fully accurate version should use the official NSE holiday calendar.
+    """
+
+    return (
+        pd.Timestamp(current_date)
+        + pd.tseries.offsets.BusinessDay(1)
+    ).date()
+
+
 # =============================================================================
 # NIFTY TOTAL MARKET UNIVERSE
 # =============================================================================
@@ -2642,7 +2656,7 @@ def calculate_winner_score(
 
 
 # =============================================================================
-# HISTORICAL FILTER STUDY
+# HISTORICAL FILTER STUDY WITH PENDING-ENTRY SUPPORT
 # =============================================================================
 
 @st.cache_data(ttl=43200, show_spinner=False)
@@ -2896,9 +2910,8 @@ def create_historical_filter_records(
     """
     Create one historical record per qualifying day.
 
-    Historical logic remains unchanged:
-    signal based on completed daily close, entry on next available
-    daily trading row.
+    This version includes the final signal even if the next
+    trading-day entry price is not yet available.
     """
 
     if prepared_data is None or prepared_data.empty:
@@ -2907,8 +2920,6 @@ def create_historical_filter_records(
     signal_data = prepared_data[
         prepared_data["historical_filter_pass"]
     ].copy()
-
-    signal_data = signal_data.iloc[:-1].copy()
 
     if signal_data.empty:
         return pd.DataFrame()
@@ -2921,6 +2932,9 @@ def create_historical_filter_records(
 
     entry_indexes = signal_indexes + 1
 
+    # Identify which signals have a valid next trading-day row.
+    valid_entry_mask = entry_indexes < len(all_data)
+
     results = pd.DataFrame(
         {
             "stock_symbol": symbol,
@@ -2929,14 +2943,39 @@ def create_historical_filter_records(
             "signal_day_price": signal_data[
                 "close"
             ].to_numpy(),
-            "entry_date": all_data.index[
-                entry_indexes
+            "entry_date": [
+                all_data.index[idx]
+                if valid
+                else next_business_day_estimate(
+                    signal_date
+                )
+                for idx, valid, signal_date in zip(
+                    entry_indexes,
+                    valid_entry_mask,
+                    signal_data.index,
+                )
             ],
-            "entry_price": all_data[
-                "close"
-            ].iloc[
-                entry_indexes
-            ].to_numpy(),
+            "entry_price": [
+                all_data["close"].iloc[idx]
+                if valid
+                else np.nan
+                for idx, valid in zip(
+                    entry_indexes,
+                    valid_entry_mask,
+                )
+            ],
+            "entry_status": [
+                "Completed Historical Entry"
+                if valid
+                else "Pending Next Trading Day"
+                for valid in valid_entry_mask
+            ],
+            "entry_price_status": [
+                "Available"
+                if valid
+                else "Not Available Yet"
+                for valid in valid_entry_mask
+            ],
             "daily_candle_return_pct": signal_data[
                 "daily_candle_return_pct"
             ].to_numpy(),
@@ -2958,6 +2997,9 @@ def create_historical_filter_records(
         }
     )
 
+    # For completed entries, calculate forward returns.
+    completed_entry_indexes = entry_indexes[valid_entry_mask]
+
     for horizon_name, horizon_days in RETURN_WINDOWS.items():
         include_minimum = horizon_name in [
             "30d",
@@ -2970,27 +3012,38 @@ def create_historical_filter_records(
         max_returns, min_returns, hit_flags = (
             calculate_window_metrics_vectorized(
                 all_data,
-                entry_indexes,
+                completed_entry_indexes,
                 horizon_days,
                 include_minimum,
             )
         )
 
-        results[f"max_ret_{horizon_name}"] = (
-            max_returns
-        )
+        # Create columns filled with NA.
+        max_column = [np.nan] * len(results)
+        min_column = [np.nan] * len(results)
+        hit_column = [pd.NA] * len(results)
 
-        results[f"hit_10pct_{horizon_name}"] = (
-            pd.array(
-                hit_flags,
-                dtype="boolean",
-            )
+        # Overwrite completed entries only.
+        completed_positions = np.where(valid_entry_mask)[0]
+
+        for position, max_ret, min_ret, hit_flag in zip(
+            completed_positions,
+            max_returns,
+            min_returns,
+            hit_flags,
+        ):
+            max_column[position] = max_ret
+            min_column[position] = min_ret
+            hit_column[position] = hit_flag
+
+        results[f"max_ret_{horizon_name}"] = max_column
+        results[f"hit_10pct_{horizon_name}"] = pd.array(
+            hit_column,
+            dtype="boolean",
         )
 
         if include_minimum:
-            results[f"min_ret_{horizon_name}"] = (
-                min_returns
-            )
+            results[f"min_ret_{horizon_name}"] = min_column
 
     return results
 
@@ -3083,8 +3136,14 @@ def run_optimized_historical_filter_study(
             ignore_index=True,
         )
         .sort_values(
-            by="signal_date",
-            ascending=False,
+            by=[
+                "signal_date",
+                "entry_status",
+            ],
+            ascending=[
+                False,
+                True,
+            ],
         )
         .reset_index(drop=True)
     )
@@ -3102,6 +3161,8 @@ def calculate_historical_study_summary(
             "unique_stock_months": 0,
             "unique_stock_quarters": 0,
             "consecutive_signal_records": 0,
+            "pending_entries": 0,
+            "latest_signal_date": None,
             "horizon_summary": pd.DataFrame(),
             "year_summary": pd.DataFrame(),
         }
@@ -3126,6 +3187,20 @@ def calculate_historical_study_summary(
         working["signal_date"]
         .dt.to_period("Q")
         .astype(str)
+    )
+
+    pending_entries = (
+        working[
+            working["entry_status"]
+            == "Pending Next Trading Day"
+        ]
+        .shape[0]
+    )
+
+    latest_signal_date = (
+        working["signal_date"].max()
+        if not working.empty
+        else None
     )
 
     unique_stock_months = (
@@ -3357,6 +3432,8 @@ def calculate_historical_study_summary(
         "unique_stock_months": unique_stock_months,
         "unique_stock_quarters": unique_stock_quarters,
         "consecutive_signal_records": consecutive_records,
+        "pending_entries": pending_entries,
+        "latest_signal_date": latest_signal_date,
         "horizon_summary": horizon_summary,
         "year_summary": year_summary,
     }
@@ -4593,7 +4670,8 @@ with st.sidebar:
         "Historical Study:\n\n"
         "• Closing-price logic only\n"
         "• Every qualifying daily signal retained\n"
-        "• Next trading-day entry\n\n"
+        "• Next trading-day entry\n"
+        "• Pending entries shown with NA entry price\n\n"
         "Live Scan:\n\n"
         "• Intraday Yahoo data during market hours\n"
         "• Provisional until market close\n"
@@ -6059,7 +6137,7 @@ elif dashboard_mode == "Historical Filter Study":
     )
 
     # =========================================================================
-    # HISTORICAL TAB — UNCHANGED CLOSING-PRICE LOGIC
+    # HISTORICAL TAB — PENDING-ENTRY SUPPORT
     # =========================================================================
 
     with historical_tab:
@@ -6067,14 +6145,14 @@ elif dashboard_mode == "Historical Filter Study":
             """
             ### Historical 5-Year Technical Filter Study
 
-            This is the existing closing-price study. It is intentionally
-            unchanged.
+            This is the existing closing-price study, now with pending-entry support.
 
             - Historical filters use completed daily candles only.
             - Signal is generated only after daily close.
             - Entry is on next available trading-day adjusted close.
             - Every repeated daily signal is included.
             - Incomplete future return windows display as `NA`.
+            - The latest qualifying signal appears with pending entry status.
             """
         )
 
@@ -6115,7 +6193,8 @@ elif dashboard_mode == "Historical Filter Study":
         st.info(
             "Every qualifying day is retained. If a stock passes on "
             "three consecutive trading days, all three dates appear as "
-            "separate historical records."
+            "separate historical records. The latest signal shows "
+            "Pending Next Trading Day with NA entry price."
         )
 
         if st.button(
@@ -6198,7 +6277,7 @@ elif dashboard_mode == "Historical Filter Study":
                 unsafe_allow_html=True,
             )
 
-            h1, h2, h3, h4, h5 = st.columns(5)
+            h1, h2, h3, h4, h5, h6 = st.columns(6)
 
             h1.metric(
                 "Total Signal Records",
@@ -6223,6 +6302,11 @@ elif dashboard_mode == "Historical Filter Study":
             h5.metric(
                 "Consecutive Signal Records",
                 summary["consecutive_signal_records"],
+            )
+
+            h6.metric(
+                "Pending Entries",
+                summary["pending_entries"],
             )
 
             st.subheader(
@@ -6279,6 +6363,8 @@ elif dashboard_mode == "Historical Filter Study":
                 "signal_day_price",
                 "entry_date",
                 "entry_price",
+                "entry_status",
+                "entry_price_status",
                 "daily_candle_return_pct",
                 "volume_ratio_vs_5d_sma",
                 "daily_rsi_14",
@@ -6315,6 +6401,22 @@ elif dashboard_mode == "Historical Filter Study":
                 ],
                 hide_index=True,
                 use_container_width=True,
+                column_config={
+                    "signal_date": st.column_config.DateColumn(
+                        "Signal Date"
+                    ),
+                    "entry_date": st.column_config.DateColumn(
+                        "Entry Date"
+                    ),
+                    "signal_day_price": st.column_config.NumberColumn(
+                        "Signal-Day Price",
+                        format="₹%.2f",
+                    ),
+                    "entry_price": st.column_config.NumberColumn(
+                        "Entry Price",
+                        format="₹%.2f",
+                    ),
+                },
             )
 
             historical_csv = historical_results.to_csv(
@@ -6329,7 +6431,7 @@ elif dashboard_mode == "Historical Filter Study":
             )
 
     # =========================================================================
-    # LIVE / TODAY FILTER SCAN — NEW INTRADAY LOGIC ONLY
+    # LIVE / TODAY FILTER SCAN — UNCHANGED INTRADAY LOGIC
     # =========================================================================
 
     with live_tab:
@@ -6747,7 +6849,7 @@ st.divider()
 st.caption(
     "Data sources: Nifty Indices constituent list and Yahoo Finance. "
     "Historical Filter Study uses completed daily closing-price data only "
-    "and is unchanged by the Live / Today Filter Scan. Live intraday results "
+    "and now includes pending entries for the latest signal. Live intraday results "
     "are provisional during market hours and may change before close. "
     "All indicators, patterns, rankings and filter results are for research "
     "only and are not investment advice."

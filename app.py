@@ -4564,6 +4564,129 @@ def create_relative_strength_chart(
 
     return figure
 
+def calculate_position_outlook(
+    daily_data,
+    weekly_data,
+    rs_data,
+    daily_patterns,
+    weekly_patterns,
+    monthly_patterns,
+    current_price,
+    avg_price,
+):
+    """
+    Calculate a simple 1–3 month technical outlook and suggested action.
+    """
+
+    daily_trend = calculate_overall_trend(daily_data)
+    weekly_trend = calculate_overall_trend(weekly_data)
+
+    rs_status = rs_data.get("status", "Insufficient data")
+    rs_trend = rs_data.get("rs_trend", "Unavailable")
+
+    # Aggregate patterns
+    all_patterns = []
+    for timeframe, patterns in [
+        ("Daily", daily_patterns),
+        ("Weekly", weekly_patterns),
+        ("Monthly", monthly_patterns),
+    ]:
+        for pattern in patterns:
+            copied = dict(pattern)
+            copied["Timeframe"] = timeframe
+            all_patterns.append(copied)
+
+    bullish_confirmed = [
+        p for p in all_patterns
+        if p["Direction"] == "Bullish" and p["Status"] == "Confirmed"
+    ]
+
+    bearish_confirmed = [
+        p for p in all_patterns
+        if p["Direction"] == "Bearish" and p["Status"] == "Confirmed"
+    ]
+
+    # Outlook logic
+    bullish_conditions = [
+        daily_trend in ["Strong bullish", "Bullish"],
+        weekly_trend in ["Strong bullish", "Bullish"],
+        rs_status in ["Leader", "Strong"],
+        rs_trend == "Rising",
+        len(bearish_confirmed) == 0,
+    ]
+
+    bearish_conditions = [
+        daily_trend == "Bearish",
+        weekly_trend == "Bearish",
+        rs_status == "Weak",
+        rs_trend == "Falling",
+        len(bearish_confirmed) > 0,
+    ]
+
+    bullish_score = sum(bullish_conditions)
+    bearish_score = sum(bearish_conditions)
+
+    if bullish_score >= 4:
+        outlook = "Bullish"
+        action = "Hold / Add"
+    elif bearish_score >= 3:
+        outlook = "Bearish"
+        action = "Reduce / Exit"
+    else:
+        outlook = "Neutral"
+        action = "Hold / Monitor"
+
+    reasons = []
+
+    if daily_trend in ["Strong bullish", "Bullish"]:
+        reasons.append(f"Daily trend is {daily_trend}")
+    elif daily_trend == "Bearish":
+        reasons.append(f"Daily trend is {daily_trend}")
+
+    if weekly_trend in ["Strong bullish", "Bullish"]:
+        reasons.append(f"Weekly trend is {weekly_trend}")
+    elif weekly_trend == "Bearish":
+        reasons.append(f"Weekly trend is {weekly_trend}")
+
+    if rs_status in ["Leader", "Strong"]:
+        reasons.append(f"Relative Strength status is {rs_status}")
+    elif rs_status == "Weak":
+        reasons.append(f"Relative Strength status is {rs_status}")
+
+    if rs_trend == "Rising":
+        reasons.append("RS line is rising")
+    elif rs_trend == "Falling":
+        reasons.append("RS line is falling")
+
+    if bullish_confirmed:
+        reasons.append(
+            f"Confirmed bullish pattern: {bullish_confirmed[0]['Pattern']} "
+            f"on {bullish_confirmed[0]['Timeframe']}"
+        )
+
+    if bearish_confirmed:
+        reasons.append(
+            f"Confirmed bearish pattern: {bearish_confirmed[0]['Pattern']} "
+            f"on {bearish_confirmed[0]['Timeframe']}"
+        )
+
+    # P&L-based nuance (optional, mild)
+    if avg_price is not None and avg_price > 0:
+        pnl_pct = (current_price / avg_price - 1) * 100
+        if pnl_pct > 20 and outlook == "Bullish":
+            reasons.append("Position is up >20% with bullish setup – consider partial profit on weakness")
+        elif pnl_pct < -15 and outlook == "Bearish":
+            reasons.append("Position is down >15% with bearish setup – consider reducing on rallies")
+
+    return {
+        "outlook": outlook,
+        "action": action,
+        "reasons": reasons,
+    }
+
+
+
+
 
 # =============================================================================
 # LOAD UNIVERSE AND BENCHMARK

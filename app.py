@@ -6535,206 +6535,8 @@ elif dashboard_mode == "Historical Filter Study":
             "Live / Today Filter Scan",
         ]
     )
+      
 
-elif dashboard_mode == "Gold & Silver Decision Hub":
-    st.subheader("Gold & Silver Decision Hub")
-
-    st.markdown(
-        "This hub helps you decide whether it is a relatively good time to "
-        "buy more, hold, or trim Gold and Silver ETFs, based on technicals "
-        "and key macro/structural drivers."
-    )
-
-    with st.spinner("Loading metals data..."):
-        metals = fetch_metals_data()
-
-    gold_tab, silver_tab = st.tabs(["Gold", "Silver"])
-
-    # -------------------------
-    # GOLD TAB
-    # -------------------------
-    with gold_tab:
-        st.markdown("### Gold (Nippon Gold BeES + Global Benchmarks)")
-
-        gold_etf = metals.get("gold_etf", {})
-        gold_futures = metals.get("gold_futures", {})
-        usd_index = metals.get("usd_index", {})
-
-        gold_etf_price = gold_etf.get("latest_price")
-        gold_futures_price = gold_futures.get("latest_price")
-
-        g1, g2 = st.columns(2)
-
-        g1.metric(
-            "Nippon Gold BeES (GOLDBEES.NS)",
-            format_price(gold_etf_price) if gold_etf_price else "Not available",
-        )
-
-        g2.metric(
-            "COMEX Gold Futures (GC=F)",
-            f"${gold_futures_price:,.2f}" if gold_futures_price else "Not available",
-        )
-
-        gold_outlook = calculate_metals_outlook(
-            etf_data=gold_etf,
-            futures_data=gold_futures,
-            usd_data=usd_index,
-            metal_type="gold",
-        )
-
-        st.divider()
-
-        o1, o2 = st.columns(2)
-
-        o1.metric(
-            "Outlook (1–3 Months)",
-            gold_outlook["outlook"],
-        )
-
-        o2.metric(
-            "Suggested Stance",
-            gold_outlook["stance"],
-        )
-
-        if gold_outlook["reasons"]:
-            st.markdown("### Key Drivers")
-            for reason in gold_outlook["reasons"]:
-                st.write(f"- {reason}")
-
-        st.divider()
-
-        st.markdown("### Buying Zones (Guidance Only)")
-
-        if gold_etf.get("data") is not None and not gold_etf["data"].empty:
-            support, resistance = calculate_support_resistance(gold_etf["data"])
-            atr = calculate_atr(gold_etf["data"], 14)
-
-            z1, z2, z3 = st.columns(3)
-
-            z1.metric(
-                "Support",
-                format_price(support),
-            )
-
-            z2.metric(
-                "Resistance",
-                format_price(resistance),
-            )
-
-            if atr is not None and gold_etf_price is not None:
-                weak_zone = gold_etf_price - 1.5 * atr
-                strong_zone = gold_etf_price - 3 * atr
-
-                z3.metric(
-                    "Approx. Weak Buy Zone",
-                    format_price(weak_zone),
-                )
-
-                st.caption(
-                    f"Stronger buy zone around {format_price(strong_zone)} "
-                    "(more volatile, use discretion)."
-                )
-        else:
-            st.info("ETF data not available for zone calculation.")
-
-        st.caption(
-            "This is a rule-based, technical + macro summary. It is not "
-            "investment advice and does not guarantee future returns."
-        )
-
-    # -------------------------
-    # SILVER TAB
-    # -------------------------
-    with silver_tab:
-        st.markdown("### Silver (Nippon Silver ETF + Global Benchmarks)")
-
-        silver_etf = metals.get("silver_etf", {})
-        silver_futures = metals.get("silver_futures", {})
-        usd_index = metals.get("usd_index", {})
-
-        silver_etf_price = silver_etf.get("latest_price")
-        silver_futures_price = silver_futures.get("latest_price")
-
-        s1, s2 = st.columns(2)
-
-        s1.metric(
-            "Nippon Silver ETF (SILVERBEES.NS)",
-            format_price(silver_etf_price) if silver_etf_price else "Not available",
-        )
-
-        s2.metric(
-            "COMEX Silver Futures (SI=F)",
-            f"${silver_futures_price:,.2f}" if silver_futures_price else "Not available",
-        )
-
-        silver_outlook = calculate_metals_outlook(
-            etf_data=silver_etf,
-            futures_data=silver_futures,
-            usd_data=usd_index,
-            metal_type="silver",
-        )
-
-        st.divider()
-
-        o1, o2 = st.columns(2)
-
-        o1.metric(
-            "Outlook (1–3 Months)",
-            silver_outlook["outlook"],
-        )
-
-        o2.metric(
-            "Suggested Stance",
-            silver_outlook["stance"],
-        )
-
-        if silver_outlook["reasons"]:
-            st.markdown("### Key Drivers")
-            for reason in silver_outlook["reasons"]:
-                st.write(f"- {reason}")
-
-        st.divider()
-
-        st.markdown("### Buying Zones (Guidance Only)")
-
-        if silver_etf.get("data") is not None and not silver_etf["data"].empty:
-            support, resistance = calculate_support_resistance(silver_etf["data"])
-            atr = calculate_atr(silver_etf["data"], 14)
-
-            z1, z2, z3 = st.columns(3)
-
-            z1.metric(
-                "Support",
-                format_price(support),
-            )
-
-            z2.metric(
-                "Resistance",
-                format_price(resistance),
-            )
-
-            if atr is not None and silver_etf_price is not None:
-                weak_zone = silver_etf_price - 1.5 * atr
-                strong_zone = silver_etf_price - 3 * atr
-
-                z3.metric(
-                    "Approx. Weak Buy Zone",
-                    format_price(weak_zone),
-                )
-
-                st.caption(
-                    f"Stronger buy zone around {format_price(strong_zone)} "
-                    "(more volatile, use discretion)."
-                )
-        else:
-            st.info("ETF data not available for zone calculation.")
-
-        st.caption(
-            "This is a rule-based, technical + macro summary. It is not "
-            "investment advice and does not guarantee future returns."
-        )
-
-    
     # =========================================================================
     # HISTORICAL TAB — PENDING-ENTRY SUPPORT
     # =========================================================================
@@ -7438,6 +7240,205 @@ elif dashboard_mode == "Gold & Silver Decision Hub":
                 },
             )
 
+elif dashboard_mode == "Gold & Silver Decision Hub":
+    st.subheader("Gold & Silver Decision Hub")
+
+    st.markdown(
+        "This hub helps you decide whether it is a relatively good time to "
+        "buy more, hold, or trim Gold and Silver ETFs, based on technicals "
+        "and key macro/structural drivers."
+    )
+
+    with st.spinner("Loading metals data..."):
+        metals = fetch_metals_data()
+
+    gold_tab, silver_tab = st.tabs(["Gold", "Silver"])
+
+    # -------------------------
+    # GOLD TAB
+    # -------------------------
+    with gold_tab:
+        st.markdown("### Gold (Nippon Gold BeES + Global Benchmarks)")
+
+        gold_etf = metals.get("gold_etf", {})
+        gold_futures = metals.get("gold_futures", {})
+        usd_index = metals.get("usd_index", {})
+
+        gold_etf_price = gold_etf.get("latest_price")
+        gold_futures_price = gold_futures.get("latest_price")
+
+        g1, g2 = st.columns(2)
+
+        g1.metric(
+            "Nippon Gold BeES (GOLDBEES.NS)",
+            format_price(gold_etf_price) if gold_etf_price else "Not available",
+        )
+
+        g2.metric(
+            "COMEX Gold Futures (GC=F)",
+            f"${gold_futures_price:,.2f}" if gold_futures_price else "Not available",
+        )
+
+        gold_outlook = calculate_metals_outlook(
+            etf_data=gold_etf,
+            futures_data=gold_futures,
+            usd_data=usd_index,
+            metal_type="gold",
+        )
+
+        st.divider()
+
+        o1, o2 = st.columns(2)
+
+        o1.metric(
+            "Outlook (1–3 Months)",
+            gold_outlook["outlook"],
+        )
+
+        o2.metric(
+            "Suggested Stance",
+            gold_outlook["stance"],
+        )
+
+        if gold_outlook["reasons"]:
+            st.markdown("### Key Drivers")
+            for reason in gold_outlook["reasons"]:
+                st.write(f"- {reason}")
+
+        st.divider()
+
+        st.markdown("### Buying Zones (Guidance Only)")
+
+        if gold_etf.get("data") is not None and not gold_etf["data"].empty:
+            support, resistance = calculate_support_resistance(gold_etf["data"])
+            atr = calculate_atr(gold_etf["data"], 14)
+
+            z1, z2, z3 = st.columns(3)
+
+            z1.metric(
+                "Support",
+                format_price(support),
+            )
+
+            z2.metric(
+                "Resistance",
+                format_price(resistance),
+            )
+
+            if atr is not None and gold_etf_price is not None:
+                weak_zone = gold_etf_price - 1.5 * atr
+                strong_zone = gold_etf_price - 3 * atr
+
+                z3.metric(
+                    "Approx. Weak Buy Zone",
+                    format_price(weak_zone),
+                )
+
+                st.caption(
+                    f"Stronger buy zone around {format_price(strong_zone)} "
+                    "(more volatile, use discretion)."
+                )
+        else:
+            st.info("ETF data not available for zone calculation.")
+
+        st.caption(
+            "This is a rule-based, technical + macro summary. It is not "
+            "investment advice and does not guarantee future returns."
+        )
+
+    # -------------------------
+    # SILVER TAB
+    # -------------------------
+    with silver_tab:
+        st.markdown("### Silver (Nippon Silver ETF + Global Benchmarks)")
+
+        silver_etf = metals.get("silver_etf", {})
+        silver_futures = metals.get("silver_futures", {})
+        usd_index = metals.get("usd_index", {})
+
+        silver_etf_price = silver_etf.get("latest_price")
+        silver_futures_price = silver_futures.get("latest_price")
+
+        s1, s2 = st.columns(2)
+
+        s1.metric(
+            "Nippon Silver ETF (SILVERBEES.NS)",
+            format_price(silver_etf_price) if silver_etf_price else "Not available",
+        )
+
+        s2.metric(
+            "COMEX Silver Futures (SI=F)",
+            f"${silver_futures_price:,.2f}" if silver_futures_price else "Not available",
+        )
+
+        silver_outlook = calculate_metals_outlook(
+            etf_data=silver_etf,
+            futures_data=silver_futures,
+            usd_data=usd_index,
+            metal_type="silver",
+        )
+
+        st.divider()
+
+        o1, o2 = st.columns(2)
+
+        o1.metric(
+            "Outlook (1–3 Months)",
+            silver_outlook["outlook"],
+        )
+
+        o2.metric(
+            "Suggested Stance",
+            silver_outlook["stance"],
+        )
+
+        if silver_outlook["reasons"]:
+            st.markdown("### Key Drivers")
+            for reason in silver_outlook["reasons"]:
+                st.write(f"- {reason}")
+
+        st.divider()
+
+        st.markdown("### Buying Zones (Guidance Only)")
+
+        if silver_etf.get("data") is not None and not silver_etf["data"].empty:
+            support, resistance = calculate_support_resistance(silver_etf["data"])
+            atr = calculate_atr(silver_etf["data"], 14)
+
+            z1, z2, z3 = st.columns(3)
+
+            z1.metric(
+                "Support",
+                format_price(support),
+            )
+
+            z2.metric(
+                "Resistance",
+                format_price(resistance),
+            )
+
+            if atr is not None and silver_etf_price is not None:
+                weak_zone = silver_etf_price - 1.5 * atr
+                strong_zone = silver_etf_price - 3 * atr
+
+                z3.metric(
+                    "Approx. Weak Buy Zone",
+                    format_price(weak_zone),
+                )
+
+                st.caption(
+                    f"Stronger buy zone around {format_price(strong_zone)} "
+                    "(more volatile, use discretion)."
+                )
+        else:
+            st.info("ETF data not available for zone calculation.")
+
+        st.caption(
+            "This is a rule-based, technical + macro summary. It is not "
+            "investment advice and does not guarantee future returns."
+        )
+
+    
 
 # =============================================================================
 # FOOTER

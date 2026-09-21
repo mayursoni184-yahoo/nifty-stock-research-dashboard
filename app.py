@@ -5338,6 +5338,7 @@ elif dashboard_mode == "Stock Research":
         alignment_tab,
         risk_tab,
         fundamentals_tab,
+        position_tab,
     ) = st.tabs(
         [
             "🏆 Winner Score",
@@ -5346,6 +5347,7 @@ elif dashboard_mode == "Stock Research":
             "MTF Alignment",
             "Risk / Reward",
             "Fundamentals",
+            "Position & Outlook",
         ]
     )
 
@@ -5972,7 +5974,119 @@ elif dashboard_mode == "Stock Research":
             use_container_width=True,
         )
 
+    with position_tab:
+        st.subheader("Position & Outlook (1–3 Months)")
 
+        st.markdown(
+            "Enter your average buy price and quantity to see a rule-based "
+            "technical outlook and suggested action for the next 1–3 months."
+        )
+
+        avg_price = st.number_input(
+            "Average buy price (₹)",
+            min_value=0.0,
+            value=0.0,
+            step=0.01,
+            key="avg_price_input",
+        )
+
+        qty = st.number_input(
+            "Quantity",
+            min_value=0,
+            value=0,
+            step=1,
+            key="qty_input",
+        )
+
+        if avg_price <= 0 or qty <= 0:
+            st.info("Enter average buy price and quantity to view outlook.")
+        else:
+            pnl = (current_price - avg_price) * qty
+            pnl_pct = (current_price / avg_price - 1) * 100
+
+            p1, p2, p3 = st.columns(3)
+
+            p1.metric(
+                "Current Price",
+                format_price(current_price),
+            )
+
+            p2.metric(
+                "Average Buy Price",
+                format_price(avg_price),
+            )
+
+            p3.metric(
+                "P&L %",
+                f"{pnl_pct:.2f}%",
+                delta=f"{pnl:,.0f}",
+            )
+
+            outlook_data = calculate_position_outlook(
+                daily_data=daily_data,
+                weekly_data=weekly_data,
+                rs_data=rs_data,
+                daily_patterns=daily_patterns,
+                weekly_patterns=weekly_patterns,
+                monthly_patterns=monthly_patterns,
+                current_price=current_price,
+                avg_price=avg_price,
+            )
+
+            st.divider()
+
+            o1, o2 = st.columns(2)
+
+            o1.metric(
+                "Outlook (1–3 Months)",
+                outlook_data["outlook"],
+            )
+
+            o2.metric(
+                "Suggested Action",
+                outlook_data["action"],
+            )
+
+            if outlook_data["reasons"]:
+                st.markdown("### Key Reasons")
+                for reason in outlook_data["reasons"]:
+                    st.write(f"- {reason}")
+
+            support, resistance = calculate_support_resistance(daily_data)
+            atr = calculate_atr(daily_data, 14)
+
+            st.divider()
+
+            st.markdown("### Risk Levels")
+
+            r1, r2, r3 = st.columns(3)
+
+            r1.metric(
+                "Support",
+                format_price(support),
+            )
+
+            r2.metric(
+                "Resistance",
+                format_price(resistance),
+            )
+
+            if atr is not None:
+                atr_stop_long = current_price - 2 * atr
+                r3.metric(
+                    "ATR-based Stop (2×ATR)",
+                    format_price(atr_stop_long),
+                )
+            else:
+                r3.metric(
+                    "ATR-based Stop (2×ATR)",
+                    "Not available",
+                )
+
+            st.caption(
+                "This outlook is rule-based and technical only. It is not "
+                "investment advice and does not guarantee future returns."
+            )
 # =============================================================================
 # WINNER RANKING SCANNER
 # =============================================================================

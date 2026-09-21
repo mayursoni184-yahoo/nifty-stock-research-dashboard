@@ -1,5 +1,7 @@
 import io
 import warnings
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -82,6 +84,11 @@ st.markdown(
 # =============================================================================
 # CONSTANTS
 # =============================================================================
+
+IST = ZoneInfo("Asia/Kolkata")
+
+NSE_MARKET_OPEN = time(9, 15)
+NSE_MARKET_CLOSE = time(15, 30)
 
 NIFTY_TOTAL_MARKET_CSV = (
     "https://niftyindices.com/IndexConstituent/"
@@ -202,9 +209,15 @@ if "historical_filter_results" not in st.session_state:
 if "historical_filter_settings" not in st.session_state:
     st.session_state["historical_filter_settings"] = {}
 
+if "live_filter_results" not in st.session_state:
+    st.session_state["live_filter_results"] = pd.DataFrame()
+
+if "live_filter_metadata" not in st.session_state:
+    st.session_state["live_filter_metadata"] = {}
+
 
 # =============================================================================
-# GENERAL UTILITIES
+# GENERAL UTILITY FUNCTIONS
 # =============================================================================
 
 def safe_number(value, default=None):
@@ -224,7 +237,7 @@ def safe_number(value, default=None):
 
 
 def format_price(value):
-    """Format price as rupees."""
+    """Format a value as Indian rupees."""
 
     value = safe_number(value)
 
@@ -246,7 +259,7 @@ def format_percent(value):
 
 
 def format_market_cap(value):
-    """Format market capitalization in crore rupees."""
+    """Format market cap in crore rupees."""
 
     value = safe_number(value)
 
@@ -257,10 +270,54 @@ def format_market_cap(value):
 
 
 def open_stock_research(symbol):
-    """Save selected stock and navigate to Stock Research."""
+    """Save selected stock and request Stock Research navigation."""
 
     st.session_state["selected_symbol"] = symbol
     st.session_state["requested_mode"] = "Stock Research"
+
+
+def get_ist_now():
+    """Return current timestamp in Asia/Kolkata."""
+
+    return datetime.now(IST)
+
+
+def get_market_status():
+    """
+    Return a basic NSE market status.
+
+    This checks weekday and regular session time only.
+    It does not automatically verify special sessions or exchange holidays.
+    """
+
+    now_ist = get_ist_now()
+
+    weekday = now_ist.weekday()
+    current_time = now_ist.time()
+
+    if weekday >= 5:
+        return {
+            "status": "CLOSED",
+            "is_open": False,
+            "now": now_ist,
+        }
+
+    if (
+        NSE_MARKET_OPEN
+        <= current_time
+        <= NSE_MARKET_CLOSE
+    ):
+        return {
+            "status": "OPEN",
+            "is_open": True,
+            "now": now_ist,
+        }
+
+    return {
+        "status": "CLOSED",
+        "is_open": False,
+        "now": now_ist,
+    }
 
 
 # =============================================================================
@@ -270,10 +327,9 @@ def open_stock_research(symbol):
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_nifty_total_market_members():
     """
-    Load current Nifty Total Market constituents.
+    Load current Nifty Total Market members.
 
-    Use a fallback stock list if the official constituent CSV
-    is unavailable from Streamlit Cloud.
+    Use fallback symbols when official CSV cannot be reached.
     """
 
     headers = {
@@ -351,7 +407,7 @@ def get_nifty_total_market_members():
 
         if len(members) < 100:
             raise ValueError(
-                "Too few valid index constituents returned."
+                "Too few valid Nifty Total Market members loaded."
             )
 
         return members, None
@@ -370,7 +426,7 @@ def get_nifty_total_market_members():
         )
 
         warning = (
-            "Could not load live Nifty Total Market constituents. "
+            "Could not load live Nifty Total Market members. "
             f"Using fallback stocks. Reason: {type(error).__name__}: {error}"
         )
 
@@ -378,33 +434,34 @@ def get_nifty_total_market_members():
 
 
 # =============================================================================
-# MARKET DATA
+# PRICE AND FUNDAMENTAL DATA
 # =============================================================================
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_price_data(ticker, period="5y"):
     """
-    Fetch historical adjusted OHLCV data from Yahoo Finance.
+    Fetch daily OHLCV data.
 
-    auto_adjust=True provides split-adjusted historical series.
+    This data is used for all historical studies and end-of-day
+    technical calculations.
     """
 
     try:
         ticker_object = yf.Ticker(ticker)
 
-        price_data = ticker_object.history(
+        data = ticker_object.history(
             period=period,
             auto_adjust=True,
         )
 
-        if price_data is None or price_data.empty:
+        if data is None or data.empty:
             return pd.DataFrame()
 
-        price_data = price_data.rename(
+        data = data.rename(
             columns=str.lower
         )
 
-        price_data = price_data[
+        data = data[
             [
                 "open",
                 "high",
@@ -414,16 +471,60 @@ def fetch_price_data(ticker, period="5y"):
             ]
         ].dropna()
 
-        price_data.index = pd.to_datetime(
-            price_data.index
+        data.index = pd.to_datetime(
+            data.index
         )
 
-        if getattr(price_data.index, "tz", None) is not None:
-            price_data.index = (
-                price_data.index.tz_localize(None)
-            )
+        if getattr(data.index, "tz", None) is not None:
+            data.index = data.index.tz_localize(None)
 
-        return price_data
+        return data
+
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_intraday_data(ticker):
+    """
+    Fetch current intraday data.
+
+    5-minute interval is used rather than 1-minute to reduce rate-limit
+    risk on free Yahoo Finance / Streamlit Cloud access.
+    """
+
+    try:
+        ticker_object = yf.Ticker(ticker)
+
+        intraday_data = ticker_object.history(
+            period="1d",
+            interval="5m",
+            auto_adjust=False,
+            prepost=False,
+        )
+
+        if intraday_data is None or intraday_data.empty:
+            return pd.DataFrame()
+
+        intraday_data = intraday_data.rename(
+            columns=str.lower
+        )
+
+        intraday_data = intraday_data[
+            [
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+            ]
+        ].dropna()
+
+        intraday_data.index = pd.to_datetime(
+            intraday_data.index
+        )
+
+        return intraday_data
 
     except Exception:
         return pd.DataFrame()
@@ -431,7 +532,7 @@ def fetch_price_data(ticker, period="5y"):
 
 @st.cache_data(ttl=43200, show_spinner=False)
 def fetch_fundamentals(ticker):
-    """Fetch current Yahoo Finance fundamental summary values."""
+    """Fetch current summary fundamental fields."""
 
     fields = [
         "marketCap",
@@ -470,15 +571,11 @@ def fetch_fundamentals(ticker):
 
 
 # =============================================================================
-# TECHNICAL INDICATOR FUNCTIONS
+# TECHNICAL INDICATORS
 # =============================================================================
 
 def calculate_rsi(close_series, period=14):
-    """
-    Calculate simple rolling RSI.
-
-    This formula matches a basic SMA-smoothed RSI approximation.
-    """
+    """Calculate rolling RSI."""
 
     delta = close_series.diff()
 
@@ -505,7 +602,7 @@ def calculate_rsi(close_series, period=14):
 
 
 def calculate_atr_series(data, period=14):
-    """Calculate ATR series for entire DataFrame."""
+    """Calculate ATR series."""
 
     previous_close = data["close"].shift(1)
 
@@ -522,17 +619,15 @@ def calculate_atr_series(data, period=14):
 
 
 def calculate_atr(data, period=14):
-    """Return current ATR value."""
+    """Return latest ATR."""
 
     if data is None or len(data) < period + 1:
         return None
 
-    atr_series = calculate_atr_series(
+    atr_value = calculate_atr_series(
         data,
         period,
-    )
-
-    atr_value = atr_series.iloc[-1]
+    ).iloc[-1]
 
     if pd.isna(atr_value):
         return None
@@ -569,23 +664,23 @@ def resample_ohlcv(data, timeframe):
 
 
 def calculate_overall_trend(data):
-    """Calculate Daily/Weekly/Monthly moving-average trend."""
+    """Calculate moving-average trend."""
 
     if data is None or len(data) < 55:
         return "Insufficient data"
 
-    current_close = float(
+    close = float(
         data["close"].iloc[-1]
     )
 
-    sma_20 = float(
+    sma20 = float(
         data["close"]
         .rolling(20)
         .mean()
         .iloc[-1]
     )
 
-    sma_50 = float(
+    sma50 = float(
         data["close"]
         .rolling(50)
         .mean()
@@ -593,20 +688,20 @@ def calculate_overall_trend(data):
     )
 
     if len(data) >= 200:
-        sma_200 = float(
+        sma200 = float(
             data["close"]
             .rolling(200)
             .mean()
             .iloc[-1]
         )
 
-        if current_close > sma_20 > sma_50 > sma_200:
+        if close > sma20 > sma50 > sma200:
             return "Strong bullish"
 
-    if current_close > sma_20 > sma_50:
+    if close > sma20 > sma50:
         return "Bullish"
 
-    if current_close < sma_20 < sma_50:
+    if close < sma20 < sma50:
         return "Bearish"
 
     return "Neutral / consolidating"
@@ -617,7 +712,7 @@ def calculate_multitimeframe_alignment(
     weekly_data,
     monthly_data,
 ):
-    """Calculate Daily, Weekly and Monthly alignment score."""
+    """Calculate alignment score across timeframes."""
 
     daily_trend = calculate_overall_trend(
         daily_data
@@ -711,11 +806,11 @@ def calculate_multitimeframe_alignment(
 
 
 # =============================================================================
-# RELATIVE STRENGTH ENGINE
+# RELATIVE STRENGTH
 # =============================================================================
 
 def align_stock_benchmark(stock_data, benchmark_data):
-    """Align stock and benchmark close series by common trading dates."""
+    """Align stock and benchmark close series."""
 
     if stock_data.empty or benchmark_data.empty:
         return pd.DataFrame()
@@ -743,7 +838,7 @@ def align_stock_benchmark(stock_data, benchmark_data):
 
 
 def calculate_period_return(close_series, days):
-    """Calculate return over number of trading days."""
+    """Calculate return for selected trading days."""
 
     if len(close_series) <= days:
         return None
@@ -752,15 +847,15 @@ def calculate_period_return(close_series, days):
         close_series.iloc[-1]
     )
 
-    previous_close = float(
+    old_close = float(
         close_series.iloc[-days - 1]
     )
 
-    if previous_close == 0:
+    if old_close == 0:
         return None
 
     return (
-        current_close / previous_close - 1
+        current_close / old_close - 1
     ) * 100
 
 
@@ -768,7 +863,7 @@ def calculate_relative_strength(
     stock_data,
     benchmark_data,
 ):
-    """Calculate RS status and returns versus Nifty 50."""
+    """Calculate relative strength metrics versus Nifty 50."""
 
     aligned = align_stock_benchmark(
         stock_data,
@@ -867,9 +962,7 @@ def calculate_relative_strength(
         else None
     )
 
-    rs_line = (
-        stock_close / benchmark_close
-    )
+    rs_line = stock_close / benchmark_close
 
     rs_trend = "Unavailable"
 
@@ -878,20 +971,20 @@ def calculate_relative_strength(
             rs_line.iloc[-1]
         )
 
-        earlier_rs = float(
+        old_rs = float(
             rs_line.iloc[-63]
         )
 
-        if latest_rs > earlier_rs * 1.03:
+        if latest_rs > old_rs * 1.03:
             rs_trend = "Rising"
 
-        elif latest_rs < earlier_rs * 0.97:
+        elif latest_rs < old_rs * 0.97:
             rs_trend = "Falling"
 
         else:
             rs_trend = "Flat"
 
-    relative_returns = [
+    available_returns = [
         value
         for value in [
             relative_1m,
@@ -902,23 +995,23 @@ def calculate_relative_strength(
         if value is not None
     ]
 
-    if len(relative_returns) < 2:
+    if len(available_returns) < 2:
         status = "Insufficient data"
 
     else:
         positive_count = sum(
             value > 0
-            for value in relative_returns
+            for value in available_returns
         )
 
         strong_count = sum(
             value > 5
-            for value in relative_returns
+            for value in available_returns
         )
 
         negative_count = sum(
             value < 0
-            for value in relative_returns
+            for value in available_returns
         )
 
         if (
@@ -963,11 +1056,11 @@ def calculate_relative_strength(
 
 
 # =============================================================================
-# PATTERN DETECTION
+# SUPPORT / RESISTANCE
 # =============================================================================
 
 def find_pivots(values, pivot_type="high", order=3):
-    """Find local high or local low pivots."""
+    """Find local pivot highs or lows."""
 
     values = np.asarray(
         values,
@@ -977,7 +1070,7 @@ def find_pivots(values, pivot_type="high", order=3):
     if len(values) < (order * 2) + 1:
         return []
 
-    output = []
+    pivot_indexes = []
 
     for index in range(order, len(values) - order):
         window = values[
@@ -986,30 +1079,31 @@ def find_pivots(values, pivot_type="high", order=3):
 
         if pivot_type == "high":
             if values[index] >= np.max(window):
-                output.append(index)
+                pivot_indexes.append(index)
 
         else:
             if values[index] <= np.min(window):
-                output.append(index)
+                pivot_indexes.append(index)
 
-    return output
+    return pivot_indexes
+
 
 def calculate_support_resistance(data):
-    """Calculate approximate support and resistance from recent pivots."""
+    """
+    Calculate approximate recent support and resistance.
+
+    This function is defined before any page rendering so Stock Research
+    and Risk/Reward tabs do not produce NameError.
+    """
 
     if data is None or data.empty:
         return None, None
 
     if len(data) < 30:
-        support = float(
-            data["low"].tail(10).min()
+        return (
+            float(data["low"].tail(10).min()),
+            float(data["high"].tail(10).max()),
         )
-
-        resistance = float(
-            data["high"].tail(10).max()
-        )
-
-        return support, resistance
 
     current_price = float(
         data["close"].iloc[-1]
@@ -1062,6 +1156,10 @@ def calculate_support_resistance(data):
     return support, resistance
 
 
+# =============================================================================
+# PATTERN DETECTION
+# =============================================================================
+
 def build_pattern_signal(
     pattern,
     status,
@@ -1071,7 +1169,7 @@ def build_pattern_signal(
     notes,
     pattern_height=None,
 ):
-    """Build standard pattern output."""
+    """Build a standard pattern-signal dictionary."""
 
     current_price = float(
         data["close"].iloc[-1]
@@ -1109,7 +1207,7 @@ def build_pattern_signal(
 
 
 def detect_patterns(data):
-    """Detect current rule-based chart structures."""
+    """Detect current rule-based technical patterns."""
 
     if data is None or data.empty:
         return []
@@ -1135,7 +1233,7 @@ def detect_patterns(data):
         dtype=float
     )
 
-    results = []
+    patterns = []
 
     pivot_highs = find_pivots(
         high,
@@ -1173,15 +1271,13 @@ def detect_patterns(data):
                 high[second_top],
             )
 
-            height = peak - neckline
-
             status = (
                 "Confirmed"
                 if close[-1] < neckline * 0.99
                 else "In progress"
             )
 
-            results.append(
+            patterns.append(
                 build_pattern_signal(
                     "Double Top",
                     status,
@@ -1189,7 +1285,7 @@ def detect_patterns(data):
                     neckline,
                     "Bearish",
                     "Two comparable highs; confirmation is below neckline.",
-                    height,
+                    peak - neckline,
                 )
             )
 
@@ -1217,15 +1313,13 @@ def detect_patterns(data):
                 low[second_bottom],
             )
 
-            height = neckline - base
-
             status = (
                 "Confirmed"
                 if close[-1] > neckline * 1.01
                 else "In progress"
             )
 
-            results.append(
+            patterns.append(
                 build_pattern_signal(
                     "Double Bottom",
                     status,
@@ -1233,7 +1327,7 @@ def detect_patterns(data):
                     neckline,
                     "Bullish",
                     "Two comparable lows; confirmation is above neckline.",
-                    height,
+                    neckline - base,
                 )
             )
 
@@ -1274,15 +1368,13 @@ def detect_patterns(data):
             high[head] > shoulder_average * 1.04
             and shoulder_difference < 0.10
         ):
-            height = high[head] - neckline
-
             status = (
                 "Confirmed"
                 if close[-1] < neckline * 0.99
                 else "In progress"
             )
 
-            results.append(
+            patterns.append(
                 build_pattern_signal(
                     "Head & Shoulders",
                     status,
@@ -1290,7 +1382,7 @@ def detect_patterns(data):
                     neckline,
                     "Bearish",
                     "Confirmation is below neckline support.",
-                    height,
+                    high[head] - neckline,
                 )
             )
 
@@ -1331,15 +1423,13 @@ def detect_patterns(data):
             low[head] < shoulder_average * 0.96
             and shoulder_difference < 0.10
         ):
-            height = neckline - low[head]
-
             status = (
                 "Confirmed"
                 if close[-1] > neckline * 1.01
                 else "In progress"
             )
 
-            results.append(
+            patterns.append(
                 build_pattern_signal(
                     "Inverse Head & Shoulders",
                     status,
@@ -1347,11 +1437,11 @@ def detect_patterns(data):
                     neckline,
                     "Bullish",
                     "Confirmation is above neckline resistance.",
-                    height,
+                    neckline - low[head],
                 )
             )
 
-    # RECTANGLE AND TRIANGLES
+    # RECTANGLE / TRIANGLES
     window_size = 30
 
     if len(data) >= window_size:
@@ -1435,13 +1525,14 @@ def detect_patterns(data):
                 else:
                     status = "In progress"
                     direction = "Neutral"
+                    level = (
+                        support
+                        if pattern_name
+                        == "Descending Triangle"
+                        else resistance
+                    )
 
-                    if pattern_name == "Descending Triangle":
-                        level = support
-                    else:
-                        level = resistance
-
-                results.append(
+                patterns.append(
                     build_pattern_signal(
                         pattern_name,
                         status,
@@ -1489,20 +1580,20 @@ def detect_patterns(data):
         - max(latest_open, latest_close)
     )
 
-    prior_low = float(
+    previous_low = float(
         np.min(low[-11:-1])
     )
 
-    prior_high = float(
+    previous_high = float(
         np.max(high[-11:-1])
     )
 
     if (
         lower_shadow / candle_range > 0.55
         and body / candle_range < 0.35
-        and latest_close <= prior_low * 1.04
+        and latest_close <= previous_low * 1.04
     ):
-        results.append(
+        patterns.append(
             build_pattern_signal(
                 "Reversal Bottom",
                 "Candidate",
@@ -1517,9 +1608,9 @@ def detect_patterns(data):
     if (
         upper_shadow / candle_range > 0.55
         and body / candle_range < 0.35
-        and latest_close >= prior_high * 0.96
+        and latest_close >= previous_high * 0.96
     ):
-        results.append(
+        patterns.append(
             build_pattern_signal(
                 "Reversal Top",
                 "Candidate",
@@ -1531,15 +1622,15 @@ def detect_patterns(data):
             )
         )
 
-    return results
+    return patterns
 
 
 # =============================================================================
-# RISK / REWARD
+# RISK / REWARD FUNCTIONS
 # =============================================================================
 
 def calculate_pattern_target(pattern):
-    """Calculate measured-move target from pattern height."""
+    """Calculate measured-move target."""
 
     level = safe_number(
         pattern.get("Level")
@@ -1573,7 +1664,7 @@ def classify_entry_quality(
     breakout_level,
     direction,
 ):
-    """Classify price extension from breakout."""
+    """Classify price extension from pattern level."""
 
     current_price = safe_number(
         current_price
@@ -1596,42 +1687,42 @@ def classify_entry_quality(
         }
 
     if direction == "Bullish":
-        distance_percent = (
+        distance = (
             (current_price - breakout_level)
             / breakout_level
         ) * 100
 
     elif direction == "Bearish":
-        distance_percent = (
+        distance = (
             (breakout_level - current_price)
             / breakout_level
         ) * 100
 
     else:
-        distance_percent = (
+        distance = (
             abs(current_price - breakout_level)
             / breakout_level
         ) * 100
 
-    if distance_percent <= 0:
+    if distance <= 0:
         status = "Below / Near Breakout"
-    elif distance_percent <= 3:
+    elif distance <= 3:
         status = "Ideal Entry Zone"
-    elif distance_percent <= 7:
+    elif distance <= 7:
         status = "Acceptable Entry Zone"
-    elif distance_percent <= 12:
+    elif distance <= 12:
         status = "Extended"
     else:
         status = "Avoid Chasing"
 
     return {
         "status": status,
-        "distance_percent": distance_percent,
+        "distance_percent": distance,
     }
 
 
 def calculate_trade_plan(data, pattern):
-    """Build current rule-based trade-plan levels."""
+    """Build a current rule-based trade plan."""
 
     if data is None or data.empty:
         return None
@@ -1680,7 +1771,7 @@ def calculate_trade_plan(data, pattern):
             else None
         )
 
-        possible_stops = [
+        stops = [
             value
             for value in [
                 technical_stop,
@@ -1691,8 +1782,8 @@ def calculate_trade_plan(data, pattern):
         ]
 
         selected_stop = (
-            min(possible_stops)
-            if possible_stops
+            min(stops)
+            if stops
             else None
         )
 
@@ -1705,7 +1796,8 @@ def calculate_trade_plan(data, pattern):
         ):
             if atr is not None:
                 target = (
-                    current_price + 3 * atr
+                    current_price
+                    + 3 * atr
                 )
 
         risk_per_share = (
@@ -1729,7 +1821,7 @@ def calculate_trade_plan(data, pattern):
             else None
         )
 
-        possible_stops = [
+        stops = [
             value
             for value in [
                 technical_stop,
@@ -1740,8 +1832,8 @@ def calculate_trade_plan(data, pattern):
         ]
 
         selected_stop = (
-            max(possible_stops)
-            if possible_stops
+            max(stops)
+            if stops
             else None
         )
 
@@ -1754,7 +1846,8 @@ def calculate_trade_plan(data, pattern):
         ):
             if atr is not None:
                 target = (
-                    current_price - 3 * atr
+                    current_price
+                    - 3 * atr
                 )
 
         risk_per_share = (
@@ -1819,7 +1912,7 @@ def calculate_position_size(
     entry_price,
     stop_loss,
 ):
-    """Calculate risk-based maximum quantity."""
+    """Calculate position size using defined portfolio risk."""
 
     portfolio_value = safe_number(
         portfolio_value
@@ -1860,7 +1953,9 @@ def calculate_position_size(
         maximum_loss / risk_per_share
     )
 
-    position_value = quantity * entry_price
+    position_value = (
+        quantity * entry_price
+    )
 
     allocation = (
         position_value / portfolio_value
@@ -2015,7 +2110,7 @@ def score_alignment(alignment):
 
 
 def score_fundamentals(fundamentals):
-    """Score current basic fundamentals out of 20."""
+    """Score currently available basics out of 20."""
 
     score = 0
     positives = []
@@ -2158,7 +2253,7 @@ def score_technical_trends(
     weekly_data,
     monthly_data,
 ):
-    """Score technical trends out of 15."""
+    """Score trends out of 15."""
 
     score = 0
     positives = []
@@ -2189,9 +2284,7 @@ def score_technical_trends(
         )
 
     elif monthly == "Bearish":
-        risks.append(
-            "Bearish Monthly trend"
-        )
+        risks.append("Bearish Monthly trend")
 
     if weekly == "Strong bullish":
         score += 5
@@ -2206,9 +2299,7 @@ def score_technical_trends(
         )
 
     elif weekly == "Bearish":
-        risks.append(
-            "Bearish Weekly trend"
-        )
+        risks.append("Bearish Weekly trend")
 
     if daily == "Strong bullish":
         score += 4
@@ -2223,9 +2314,7 @@ def score_technical_trends(
         )
 
     elif daily == "Bearish":
-        risks.append(
-            "Bearish Daily trend"
-        )
+        risks.append("Bearish Daily trend")
 
     return {
         "score": min(score, 15),
@@ -2239,7 +2328,7 @@ def score_patterns(
     weekly_patterns,
     monthly_patterns,
 ):
-    """Score current patterns out of 15."""
+    """Score current technical patterns out of 15."""
 
     score = 0
     positives = []
@@ -2247,7 +2336,7 @@ def score_patterns(
 
     confirmed_bullish = False
 
-    all_groups = [
+    pattern_groups = [
         (
             "Daily",
             daily_patterns,
@@ -2262,7 +2351,7 @@ def score_patterns(
         ),
     ]
 
-    for timeframe, patterns in all_groups:
+    for timeframe, patterns in pattern_groups:
         for pattern in patterns:
             status = pattern.get("Status")
             direction = pattern.get("Direction")
@@ -2322,9 +2411,9 @@ def score_volume(
     daily_patterns,
     weekly_patterns,
 ):
-    """Score current breakout volume out of 5."""
+    """Score breakout volume out of 5."""
 
-    volume_values = []
+    volumes = []
 
     for pattern in daily_patterns + weekly_patterns:
         if (
@@ -2336,16 +2425,16 @@ def score_volume(
             )
 
             if volume is not None:
-                volume_values.append(volume)
+                volumes.append(volume)
 
-    if not volume_values:
+    if not volumes:
         return {
             "score": 0,
             "positives": [],
             "risks": [],
         }
 
-    highest_volume = max(volume_values)
+    highest_volume = max(volumes)
 
     if highest_volume >= 50:
         return {
@@ -2384,7 +2473,7 @@ def score_volume(
 
 
 def score_valuation_risk(fundamentals):
-    """Score valuation/risk conditions out of 5."""
+    """Score valuation and leverage out of 5."""
 
     score = 0
     positives = []
@@ -2456,7 +2545,7 @@ def calculate_winner_score(
     weekly_patterns,
     monthly_patterns,
 ):
-    """Calculate transparent Winner Score out of 100."""
+    """Calculate Winner Score out of 100."""
 
     rs_component = score_relative_strength(
         rs_data
@@ -2553,7 +2642,7 @@ def calculate_winner_score(
 
 
 # =============================================================================
-# OPTIMIZED HISTORICAL FILTER ENGINE
+# HISTORICAL FILTER STUDY
 # =============================================================================
 
 @st.cache_data(ttl=43200, show_spinner=False)
@@ -2561,18 +2650,10 @@ def prepare_historical_filter_indicators(
     ticker,
 ):
     """
-    Prepare all historical indicator columns once per stock.
+    Prepare vectorized historical indicators.
 
-    This is the optimized vectorized engine:
-    - Daily volume SMA5
-    - Daily SMA20/SMA200
-    - Daily ATR14 percentage
-    - Daily RSI14
-    - Weekly close/SMA20/RSI14
-    - Previous day / two-day close
-    - One Boolean filter-pass column
-
-    Every qualifying daily signal is retained.
+    This logic is unchanged from the optimized historical study:
+    all filters use completed historical daily close/volume values.
     """
 
     data = fetch_price_data(
@@ -2585,7 +2666,6 @@ def prepare_historical_filter_indicators(
 
     data = data.copy()
 
-    # Daily price and volume indicators
     data["volume_sma_5"] = (
         data["volume"]
         .rolling(5)
@@ -2635,7 +2715,6 @@ def prepare_historical_filter_indicators(
         / data["volume_sma_5"]
     )
 
-    # Weekly indicators computed once, then forward-filled to daily dates.
     weekly_data = (
         data[
             [
@@ -2680,7 +2759,6 @@ def prepare_historical_filter_indicators(
         }
     )
 
-    # Merge weekly values to daily signal dates using previous available week.
     daily_dates = pd.DataFrame(
         {
             "date": data.index,
@@ -2700,9 +2778,7 @@ def prepare_historical_filter_indicators(
         weekly_dates.sort_values("date"),
         on="date",
         direction="backward",
-    )
-
-    merged = merged.set_index("date")
+    ).set_index("date")
 
     data["weekly_close"] = merged[
         "weekly_close"
@@ -2716,7 +2792,6 @@ def prepare_historical_filter_indicators(
         "weekly_rsi_14"
     ]
 
-    # Exact technical screen from the user query.
     data["historical_filter_pass"] = (
         (data["volume"] > data["volume_sma_5"] * 1.5)
         & (data["daily_candle_return_pct"] > 2)
@@ -2741,17 +2816,14 @@ def calculate_window_metrics_vectorized(
     include_minimum,
 ):
     """
-    Calculate forward maximum/minimum returns for all signals.
+    Calculate future maximum/minimum returns for qualifying signals.
 
-    This function loops only through qualifying signal rows, not through
-    every historical day, keeping the study much faster.
+    A result is NA if full future window has not elapsed.
     """
 
     max_returns = []
     min_returns = []
     hit_10pct = []
-
-    total_rows = len(data)
 
     high_values = data["high"].to_numpy(
         dtype=float
@@ -2765,11 +2837,12 @@ def calculate_window_metrics_vectorized(
         dtype=float
     )
 
-    for entry_index in entry_indexes:
-        last_index = entry_index + window_days
+    total_rows = len(data)
 
-        # Future period must complete in full; otherwise output NA.
-        if last_index >= total_rows:
+    for entry_index in entry_indexes:
+        final_index = entry_index + window_days
+
+        if final_index >= total_rows:
             max_returns.append(np.nan)
             min_returns.append(np.nan)
             hit_10pct.append(pd.NA)
@@ -2778,30 +2851,29 @@ def calculate_window_metrics_vectorized(
         entry_price = close_values[entry_index]
 
         future_highs = high_values[
-            entry_index + 1:last_index + 1
+            entry_index + 1:final_index + 1
         ]
 
-        maximum_high = np.max(future_highs)
-
         max_return = (
-            maximum_high / entry_price - 1
+            np.max(future_highs)
+            / entry_price
+            - 1
         ) * 100
 
         max_returns.append(max_return)
-
         hit_10pct.append(
             bool(max_return >= 10)
         )
 
         if include_minimum:
             future_lows = low_values[
-                entry_index + 1:last_index + 1
+                entry_index + 1:final_index + 1
             ]
 
-            minimum_low = np.min(future_lows)
-
             min_return = (
-                minimum_low / entry_price - 1
+                np.min(future_lows)
+                / entry_price
+                - 1
             ) * 100
 
             min_returns.append(min_return)
@@ -2822,10 +2894,11 @@ def create_historical_filter_records(
     prepared_data,
 ):
     """
-    Create one record for every qualifying daily signal.
+    Create one historical record per qualifying day.
 
-    No repeated-signal gap is applied.
-    If a stock passes on consecutive days, each date is a separate record.
+    Historical logic remains unchanged:
+    signal based on completed daily close, entry on next available
+    daily trading row.
     """
 
     if prepared_data is None or prepared_data.empty:
@@ -2835,7 +2908,6 @@ def create_historical_filter_records(
         prepared_data["historical_filter_pass"]
     ].copy()
 
-    # A next trading day entry is required.
     signal_data = signal_data.iloc[:-1].copy()
 
     if signal_data.empty:
@@ -2886,8 +2958,7 @@ def create_historical_filter_records(
         }
     )
 
-    # Create requested return columns.
-    for horizon_name, days in RETURN_WINDOWS.items():
+    for horizon_name, horizon_days in RETURN_WINDOWS.items():
         include_minimum = horizon_name in [
             "30d",
             "60d",
@@ -2896,11 +2967,11 @@ def create_historical_filter_records(
             "12m",
         ]
 
-        max_returns, min_returns, target_hits = (
+        max_returns, min_returns, hit_flags = (
             calculate_window_metrics_vectorized(
                 all_data,
                 entry_indexes,
-                days,
+                horizon_days,
                 include_minimum,
             )
         )
@@ -2911,7 +2982,7 @@ def create_historical_filter_records(
 
         results[f"hit_10pct_{horizon_name}"] = (
             pd.array(
-                target_hits,
+                hit_flags,
                 dtype="boolean",
             )
         )
@@ -2931,10 +3002,10 @@ def run_optimized_historical_filter_study(
     progress_callback=None,
 ):
     """
-    Run optimized historical study.
+    Run historical study across selected current market-cap eligible stocks.
 
-    Current Market Cap is the only current eligibility filter.
-    All qualifying historical technical signal dates are included.
+    Current market-cap eligibility only.
+    Historical D/E, EPS, ROE intentionally excluded.
     """
 
     output_frames = []
@@ -2983,11 +3054,9 @@ def run_optimized_historical_filter_study(
 
             stock_records = (
                 create_historical_filter_records(
-                    symbol=record["Symbol"],
-                    company_name=record[
-                        "Company Name"
-                    ],
-                    prepared_data=prepared_data,
+                    record["Symbol"],
+                    record["Company Name"],
+                    prepared_data,
                 )
             )
 
@@ -3008,23 +3077,23 @@ def run_optimized_historical_filter_study(
     if not output_frames:
         return pd.DataFrame()
 
-    results = pd.concat(
-        output_frames,
-        ignore_index=True,
+    return (
+        pd.concat(
+            output_frames,
+            ignore_index=True,
+        )
+        .sort_values(
+            by="signal_date",
+            ascending=False,
+        )
+        .reset_index(drop=True)
     )
 
-    return results.sort_values(
-        by="signal_date",
-        ascending=False,
-    ).reset_index(drop=True)
 
-
-def calculate_optimized_study_summary(
+def calculate_historical_study_summary(
     results,
 ):
-    """
-    Calculate study summary including repeated/consecutive signal diagnostics.
-    """
+    """Calculate historical study summary."""
 
     if results is None or results.empty:
         return {
@@ -3081,35 +3150,26 @@ def calculate_optimized_study_summary(
         .shape[0]
     )
 
-    # Counts signal rows where same stock was also a signal
-    # on immediately preceding available trading-date record.
-    consecutive_count = 0
+    consecutive_records = 0
 
     for _, group in working.groupby(
         "stock_symbol"
     ):
-        sorted_group = group.sort_values(
-            "signal_date"
+        dates = (
+            group
+            .sort_values("signal_date")[
+                "signal_date"
+            ]
+            .tolist()
         )
 
-        dates = sorted_group[
-            "signal_date"
-        ].tolist()
-
-        if len(dates) <= 1:
-            continue
-
         for index in range(1, len(dates)):
-            day_gap = (
+            if (
                 dates[index] - dates[index - 1]
-            ).days
+            ).days <= 4:
+                consecutive_records += 1
 
-            if day_gap <= 4:
-                consecutive_count += 1
-
-    horizon_rows = []
-
-    horizon_configuration = [
+    horizon_config = [
         (
             "5 Trading Days",
             "max_ret_5d",
@@ -3166,34 +3226,36 @@ def calculate_optimized_study_summary(
         ),
     ]
 
+    horizon_rows = []
+
     for (
         label,
         max_column,
         min_column,
         hit_column,
-    ) in horizon_configuration:
-        completed_max = working[
+    ) in horizon_config:
+        max_values = working[
             max_column
         ].dropna()
 
-        completed_hit = working[
+        hit_values = working[
             hit_column
         ].dropna()
 
         if min_column is not None:
-            completed_min = working[
+            min_values = working[
                 min_column
             ].dropna()
 
             average_min = (
-                completed_min.mean()
-                if not completed_min.empty
+                min_values.mean()
+                if not min_values.empty
                 else None
             )
 
             median_min = (
-                completed_min.median()
-                if not completed_min.empty
+                min_values.median()
+                if not min_values.empty
                 else None
             )
         else:
@@ -3204,23 +3266,23 @@ def calculate_optimized_study_summary(
             {
                 "Horizon": label,
                 "Completed Signals": len(
-                    completed_max
+                    max_values
                 ),
                 "Average Max Return %": (
-                    completed_max.mean()
-                    if not completed_max.empty
+                    max_values.mean()
+                    if not max_values.empty
                     else None
                 ),
                 "Median Max Return %": (
-                    completed_max.median()
-                    if not completed_max.empty
+                    max_values.median()
+                    if not max_values.empty
                     else None
                 ),
                 "Average Min Return %": average_min,
                 "Median Min Return %": median_min,
                 "10% Hit Rate %": (
-                    completed_hit.mean() * 100
-                    if not completed_hit.empty
+                    hit_values.mean() * 100
+                    if not hit_values.empty
                     else None
                 ),
             }
@@ -3294,31 +3356,172 @@ def calculate_optimized_study_summary(
         ].nunique(),
         "unique_stock_months": unique_stock_months,
         "unique_stock_quarters": unique_stock_quarters,
-        "consecutive_signal_records": consecutive_count,
+        "consecutive_signal_records": consecutive_records,
         "horizon_summary": horizon_summary,
         "year_summary": year_summary,
     }
 
 
 # =============================================================================
-# CURRENT SCANNER ANALYSIS
+# LIVE / TODAY FILTER SCAN
 # =============================================================================
 
-def analyse_stock_for_scanner(
-    record,
-    benchmark_data,
-    minimum_market_cap,
+def calculate_provisional_rsi(
+    completed_close_series,
+    current_live_price,
 ):
-    """Build current stock record for Command Center and Winner Scanner."""
+    """
+    Calculate provisional daily RSI.
+
+    Uses completed daily closes plus current live price as today's
+    provisional close. This does not alter historical data.
+    """
+
+    provisional_close = pd.concat(
+        [
+            completed_close_series,
+            pd.Series(
+                [current_live_price],
+                index=[
+                    completed_close_series.index[-1]
+                    + pd.Timedelta(days=1)
+                ],
+            ),
+        ]
+    )
+
+    rsi_series = calculate_rsi(
+        provisional_close,
+        14,
+    )
+
+    rsi_value = rsi_series.iloc[-1]
+
+    return (
+        float(rsi_value)
+        if not pd.isna(rsi_value)
+        else None
+    )
+
+
+def calculate_live_weekly_values(
+    completed_daily_data,
+    current_live_price,
+):
+    """
+    Calculate provisional current weekly close, weekly SMA20 and weekly RSI14.
+
+    The current weekly candle uses latest live price as provisional close.
+    Previous completed weeks remain unchanged.
+    """
+
+    weekly_completed = resample_ohlcv(
+        completed_daily_data,
+        "Weekly",
+    )
+
+    if weekly_completed.empty:
+        return None, None, None
+
+    current_timestamp = get_ist_now()
+
+    current_week_end = (
+        pd.Timestamp(current_timestamp.date())
+        + pd.offsets.Week(
+            weekday=4
+        )
+    ).normalize()
+
+    provisional_weekly = weekly_completed.copy()
+
+    if (
+        len(provisional_weekly) > 0
+        and provisional_weekly.index[-1]
+        == current_week_end
+    ):
+        provisional_weekly.loc[
+            provisional_weekly.index[-1],
+            "close",
+        ] = current_live_price
+    else:
+        new_week_row = pd.DataFrame(
+            {
+                "open": [current_live_price],
+                "high": [current_live_price],
+                "low": [current_live_price],
+                "close": [current_live_price],
+                "volume": [0],
+            },
+            index=[current_week_end],
+        )
+
+        provisional_weekly = pd.concat(
+            [
+                provisional_weekly,
+                new_week_row,
+            ]
+        )
+
+    weekly_close = float(
+        provisional_weekly["close"].iloc[-1]
+    )
+
+    weekly_sma_20 = (
+        float(
+            provisional_weekly["close"]
+            .rolling(20)
+            .mean()
+            .iloc[-1]
+        )
+        if len(provisional_weekly) >= 20
+        else None
+    )
+
+    weekly_rsi_series = calculate_rsi(
+        provisional_weekly["close"],
+        14,
+    )
+
+    weekly_rsi_value = weekly_rsi_series.iloc[-1]
+
+    weekly_rsi = (
+        float(weekly_rsi_value)
+        if not pd.isna(weekly_rsi_value)
+        else None
+    )
+
+    return (
+        weekly_close,
+        weekly_sma_20,
+        weekly_rsi,
+    )
+
+
+def calculate_live_filter_for_stock(
+    record,
+    minimum_market_cap,
+    market_open,
+):
+    """
+    Evaluate the current technical filter.
+
+    If market is open:
+    - completed historical daily values are retained
+    - latest intraday price and cumulative volume are used for today's
+      provisional close / volume
+
+    If market is closed:
+    - final/latest daily close and daily volume are used
+    """
 
     ticker = record["Ticker"]
 
-    data = fetch_price_data(
+    daily_data = fetch_price_data(
         ticker,
         "5y",
     )
 
-    if data.empty:
+    if daily_data.empty or len(daily_data) < 220:
         return None
 
     fundamentals = fetch_fundamentals(
@@ -3336,15 +3539,434 @@ def analyse_stock_for_scanner(
     if market_cap_crore < minimum_market_cap:
         return None
 
-    daily_data = data
+    live_source = "Daily End-of-Day"
+    live_timestamp = None
+    signal_status = "Confirmed EOD"
+    data_mode = "End-of-Day Confirmed"
+
+    # -------------------------------------------------------------------------
+    # MARKET OPEN: use intraday current price / volume.
+    # -------------------------------------------------------------------------
+
+    if market_open:
+        intraday_data = fetch_intraday_data(
+            ticker
+        )
+
+        if not intraday_data.empty:
+            latest_intraday = intraday_data.iloc[-1]
+
+            latest_price = float(
+                latest_intraday["close"]
+            )
+
+            today_open = float(
+                intraday_data["open"].iloc[0]
+            )
+
+            today_high = float(
+                intraday_data["high"].max()
+            )
+
+            today_low = float(
+                intraday_data["low"].min()
+            )
+
+            # Intraday bars commonly contain per-bar volume;
+            # cumulative sum is used for current session volume.
+            today_volume = float(
+                intraday_data["volume"].sum()
+            )
+
+            timestamp = intraday_data.index[-1]
+
+            if getattr(timestamp, "tzinfo", None) is not None:
+                timestamp_ist = timestamp.tz_convert(
+                    IST
+                )
+            else:
+                timestamp_ist = timestamp.tz_localize(
+                    IST
+                )
+
+            live_timestamp = timestamp_ist
+
+            live_source = "Yahoo Finance 5-minute Intraday"
+
+            signal_status = "Provisional Intraday"
+
+            data_mode = "Provisional Intraday"
+
+            # If the daily dataset already contains a row for today,
+            # remove it to ensure all daily indicators use completed days.
+            now_ist = get_ist_now()
+
+            if (
+                daily_data.index[-1].date()
+                == now_ist.date()
+            ):
+                completed_data = daily_data.iloc[
+                    :-1
+                ].copy()
+            else:
+                completed_data = daily_data.copy()
+
+        else:
+            # Fallback to daily data if intraday unavailable.
+            completed_data = daily_data.copy()
+
+            latest_price = float(
+                daily_data["close"].iloc[-1]
+            )
+
+            today_open = float(
+                daily_data["open"].iloc[-1]
+            )
+
+            today_high = float(
+                daily_data["high"].iloc[-1]
+            )
+
+            today_low = float(
+                daily_data["low"].iloc[-1]
+            )
+
+            today_volume = float(
+                daily_data["volume"].iloc[-1]
+            )
+
+            live_timestamp = daily_data.index[-1]
+
+            live_source = (
+                "Fallback: Latest Daily Data"
+            )
+
+            signal_status = "Fallback Daily Data"
+
+            data_mode = (
+                "Daily Fallback - Intraday Unavailable"
+            )
+
+    # -------------------------------------------------------------------------
+    # MARKET CLOSED: use daily final/latest values.
+    # -------------------------------------------------------------------------
+
+    else:
+        completed_data = daily_data.iloc[
+            :-1
+        ].copy()
+
+        latest_price = float(
+            daily_data["close"].iloc[-1]
+        )
+
+        today_open = float(
+            daily_data["open"].iloc[-1]
+        )
+
+        today_high = float(
+            daily_data["high"].iloc[-1]
+        )
+
+        today_low = float(
+            daily_data["low"].iloc[-1]
+        )
+
+        today_volume = float(
+            daily_data["volume"].iloc[-1]
+        )
+
+        live_timestamp = daily_data.index[-1]
+
+    if len(completed_data) < 220:
+        return None
+
+    # -------------------------------------------------------------------------
+    # All rolling indicators below use only previously completed daily data.
+    # -------------------------------------------------------------------------
+
+    prior_5d_average_volume = float(
+        completed_data["volume"]
+        .tail(5)
+        .mean()
+    )
+
+    daily_sma_20 = float(
+        completed_data["close"]
+        .tail(20)
+        .mean()
+    )
+
+    daily_sma_200 = float(
+        completed_data["close"]
+        .tail(200)
+        .mean()
+    )
+
+    previous_day_close = float(
+        completed_data["close"].iloc[-1]
+    )
+
+    two_day_ago_close = float(
+        completed_data["close"].iloc[-2]
+    )
+
+    completed_atr = calculate_atr(
+        completed_data,
+        14,
+    )
+
+    atr_pct = (
+        completed_atr / latest_price * 100
+        if completed_atr is not None
+        and latest_price != 0
+        else None
+    )
+
+    provisional_daily_rsi = calculate_provisional_rsi(
+        completed_data["close"],
+        latest_price,
+    )
+
+    (
+        provisional_weekly_close,
+        provisional_weekly_sma_20,
+        provisional_weekly_rsi,
+    ) = calculate_live_weekly_values(
+        completed_data,
+        latest_price,
+    )
+
+    current_day_change_pct = (
+        (latest_price / today_open - 1) * 100
+        if today_open != 0
+        else None
+    )
+
+    volume_ratio = (
+        today_volume / prior_5d_average_volume
+        if prior_5d_average_volume != 0
+        else None
+    )
+
+    # Conditions matching your query.
+    volume_condition = (
+        volume_ratio is not None
+        and volume_ratio > 1.5
+    )
+
+    candle_condition = (
+        current_day_change_pct is not None
+        and current_day_change_pct > 2
+    )
+
+    sma20_condition = (
+        latest_price > daily_sma_20
+    )
+
+    sma200_condition = (
+        latest_price > daily_sma_200
+    )
+
+    weekly_sma_condition = (
+        provisional_weekly_close is not None
+        and provisional_weekly_sma_20 is not None
+        and provisional_weekly_close
+        > provisional_weekly_sma_20
+    )
+
+    atr_condition = (
+        atr_pct is not None
+        and atr_pct > 3
+    )
+
+    daily_rsi_condition = (
+        provisional_daily_rsi is not None
+        and provisional_daily_rsi >= 55
+        and provisional_daily_rsi <= 90
+    )
+
+    weekly_rsi_condition = (
+        provisional_weekly_rsi is not None
+        and provisional_weekly_rsi >= 55
+    )
+
+    close_1d_condition = (
+        latest_price > previous_day_close
+    )
+
+    close_2d_condition = (
+        latest_price > two_day_ago_close
+    )
+
+    all_filters_pass = (
+        volume_condition
+        and candle_condition
+        and sma20_condition
+        and sma200_condition
+        and weekly_sma_condition
+        and atr_condition
+        and daily_rsi_condition
+        and weekly_rsi_condition
+        and close_1d_condition
+        and close_2d_condition
+    )
+
+    return {
+        "stock_symbol": record["Symbol"],
+        "stock_name": record["Company Name"],
+        "industry": record["Industry"],
+        "market_cap_cr": market_cap_crore,
+        "market_status": (
+            "OPEN"
+            if market_open
+            else "CLOSED"
+        ),
+        "data_mode": data_mode,
+        "signal_status": signal_status,
+        "data_source": live_source,
+        "signal_timestamp_ist": live_timestamp,
+        "latest_price": latest_price,
+        "today_open": today_open,
+        "today_high": today_high,
+        "today_low": today_low,
+        "current_day_change_pct": current_day_change_pct,
+        "current_volume": today_volume,
+        "prior_5d_average_volume": prior_5d_average_volume,
+        "volume_ratio_vs_prior_5d": volume_ratio,
+        "daily_sma_20": daily_sma_20,
+        "daily_sma_200": daily_sma_200,
+        "weekly_close_or_live_price": provisional_weekly_close,
+        "weekly_sma_20": provisional_weekly_sma_20,
+        "atr_14_pct": atr_pct,
+        "daily_rsi_14": provisional_daily_rsi,
+        "weekly_rsi_14": provisional_weekly_rsi,
+        "volume_condition": volume_condition,
+        "candle_change_condition": candle_condition,
+        "close_above_sma20": sma20_condition,
+        "close_above_sma200": sma200_condition,
+        "weekly_above_sma20": weekly_sma_condition,
+        "atr_condition": atr_condition,
+        "daily_rsi_condition": daily_rsi_condition,
+        "weekly_rsi_condition": weekly_rsi_condition,
+        "close_above_1d": close_1d_condition,
+        "close_above_2d": close_2d_condition,
+        "all_filters_pass": all_filters_pass,
+        "current_debt_equity_reference": fundamentals.get(
+            "debtToEquity"
+        ),
+        "current_eps_reference": fundamentals.get(
+            "trailingEps"
+        ),
+        "current_roe_reference": fundamentals.get(
+            "returnOnEquity"
+        ),
+    }
+
+
+def run_live_filter_scan(
+    universe,
+    minimum_market_cap,
+    scan_limit,
+    market_open,
+    progress_callback=None,
+):
+    """Run the new Live / Today technical filter scan."""
+
+    rows = []
+
+    selected_universe = universe.head(
+        scan_limit
+    ).copy()
+
+    total = len(selected_universe)
+
+    for position, (_, record) in enumerate(
+        selected_universe.iterrows(),
+        start=1,
+    ):
+        if progress_callback is not None:
+            progress_callback(
+                position,
+                total,
+                record["Symbol"],
+            )
+
+        try:
+            result = calculate_live_filter_for_stock(
+                record,
+                minimum_market_cap,
+                market_open,
+            )
+
+            if result is not None:
+                rows.append(result)
+
+        except Exception:
+            pass
+
+    if not rows:
+        return pd.DataFrame()
+
+    results = pd.DataFrame(rows)
+
+    return results.sort_values(
+        by=[
+            "all_filters_pass",
+            "current_day_change_pct",
+            "volume_ratio_vs_prior_5d",
+        ],
+        ascending=[
+            False,
+            False,
+            False,
+        ],
+    ).reset_index(drop=True)
+
+
+# =============================================================================
+# CURRENT SCANNER / COMMAND CENTER
+# =============================================================================
+
+def analyse_stock_for_scanner(
+    record,
+    benchmark_data,
+    minimum_market_cap,
+):
+    """Build current stock record for Command Center and Ranking Scanner."""
+
+    ticker = record["Ticker"]
+
+    daily_data = fetch_price_data(
+        ticker,
+        "5y",
+    )
+
+    if daily_data.empty:
+        return None
+
+    fundamentals = fetch_fundamentals(
+        ticker
+    )
+
+    market_cap_crore = (
+        safe_number(
+            fundamentals.get("marketCap"),
+            0,
+        )
+        / 10000000
+    )
+
+    if market_cap_crore < minimum_market_cap:
+        return None
 
     weekly_data = resample_ohlcv(
-        data,
+        daily_data,
         "Weekly",
     )
 
     monthly_data = resample_ohlcv(
-        data,
+        daily_data,
         "Monthly",
     )
 
@@ -3361,7 +3983,7 @@ def analyse_stock_for_scanner(
     )
 
     rs_data = calculate_relative_strength(
-        data,
+        daily_data,
         benchmark_data,
     )
 
@@ -3402,9 +4024,7 @@ def analyse_stock_for_scanner(
         for pattern in patterns:
             copied_pattern = dict(pattern)
             copied_pattern["Timeframe"] = timeframe
-            all_patterns.append(
-                copied_pattern
-            )
+            all_patterns.append(copied_pattern)
 
     bullish_confirmed = [
         pattern
@@ -3416,7 +4036,7 @@ def analyse_stock_for_scanner(
     ]
 
     if bullish_confirmed:
-        priority = {
+        timeframe_priority = {
             "Monthly": 3,
             "Weekly": 2,
             "Daily": 1,
@@ -3424,7 +4044,7 @@ def analyse_stock_for_scanner(
 
         selected_pattern = sorted(
             bullish_confirmed,
-            key=lambda item: priority.get(
+            key=lambda item: timeframe_priority.get(
                 item["Timeframe"],
                 0,
             ),
@@ -3585,9 +4205,9 @@ def run_current_universe_scan(
     scan_limit,
     progress_callback=None,
 ):
-    """Run current scanner across selected number of stocks."""
+    """Run current command center / ranking scan."""
 
-    result_rows = []
+    rows = []
 
     selected_universe = universe.head(
         scan_limit
@@ -3614,19 +4234,19 @@ def run_current_universe_scan(
             )
 
             if result is not None:
-                result_rows.append(result)
+                rows.append(result)
 
         except Exception:
             pass
 
-    if not result_rows:
+    if not rows:
         return pd.DataFrame()
 
-    return pd.DataFrame(result_rows)
+    return pd.DataFrame(rows)
 
 
 # =============================================================================
-# MARKET REGIME FUNCTIONS
+# MARKET REGIME
 # =============================================================================
 
 def calculate_market_breadth(scan_data):
@@ -3684,7 +4304,7 @@ def calculate_market_regime(
     nifty_data,
     breadth,
 ):
-    """Classify broad market regime."""
+    """Classify broad market conditions."""
 
     nifty_trend = calculate_overall_trend(
         nifty_data
@@ -3734,7 +4354,7 @@ def calculate_market_regime(
 
 
 # =============================================================================
-# VISUALIZATION FUNCTIONS
+# VISUALIZATIONS
 # =============================================================================
 
 def create_stock_chart(
@@ -3742,7 +4362,7 @@ def create_stock_chart(
     patterns,
     title,
 ):
-    """Create candlestick chart with MA20, MA50, volume and patterns."""
+    """Create candlestick chart with MA20/MA50, volume and pattern levels."""
 
     chart_data = data.tail(260).copy()
 
@@ -3839,7 +4459,7 @@ def create_relative_strength_chart(
     rs_line,
     symbol,
 ):
-    """Create Relative Strength line chart versus Nifty 50."""
+    """Create RS line chart."""
 
     figure = go.Figure()
 
@@ -3869,7 +4489,7 @@ def create_relative_strength_chart(
 
 
 # =============================================================================
-# DATA LOADING
+# LOAD UNIVERSE AND BENCHMARK
 # =============================================================================
 
 with st.spinner(
@@ -3905,7 +4525,7 @@ st.markdown(
     """
     <div class="sub-title">
         Daily Command Center • Stock Research • Winner Ranking •
-        Optimized Historical Technical Filter Study
+        Historical Closing-Price Study • Live / Today Provisional Filter Scan
     </div>
     """,
     unsafe_allow_html=True,
@@ -3916,14 +4536,14 @@ if universe_error:
 
 if stock_universe.empty:
     st.error(
-        "No stock universe is available."
+        "No stock universe could be loaded."
     )
     st.stop()
 
 if nifty_50_data.empty:
     st.warning(
         "Nifty 50 benchmark data is unavailable. "
-        "Relative Strength may be incomplete."
+        "Relative Strength results may be incomplete."
     )
 
 
@@ -3970,11 +4590,14 @@ with st.sidebar:
     st.divider()
 
     st.caption(
-        "Historical Filter Study:\n\n"
-        "• Every qualifying daily signal is included\n"
-        "• No repeated-signal gap\n"
-        "• Entry = next available trading-day adjusted close\n"
-        "• Historical D/E, EPS and ROE are not evaluated in Option B"
+        "Historical Study:\n\n"
+        "• Closing-price logic only\n"
+        "• Every qualifying daily signal retained\n"
+        "• Next trading-day entry\n\n"
+        "Live Scan:\n\n"
+        "• Intraday Yahoo data during market hours\n"
+        "• Provisional until market close\n"
+        "• Daily-data fallback if intraday unavailable"
     )
 
 
@@ -3987,14 +4610,9 @@ if dashboard_mode == "Daily Market Command Center":
         "Daily Market Command Center"
     )
 
-    st.caption(
-        "Find stronger current stocks, bullish breakouts, entry zones, "
-        "extended setups and risk alerts."
-    )
+    command_col1, command_col2 = st.columns(2)
 
-    col1, col2 = st.columns(2)
-
-    with col1:
+    with command_col1:
         command_scan_limit = st.selectbox(
             "Stocks to scan",
             [
@@ -4008,7 +4626,7 @@ if dashboard_mode == "Daily Market Command Center":
             key="command_scan_limit",
         )
 
-    with col2:
+    with command_col2:
         command_min_score = st.slider(
             "Minimum Winner Score",
             min_value=0,
@@ -4059,7 +4677,7 @@ if dashboard_mode == "Daily Market Command Center":
 
     if command_results is None or command_results.empty:
         st.info(
-            "Click Run Daily Command Center Scan to begin."
+            "Click Run Daily Command Center Scan to start."
         )
 
     else:
@@ -4072,20 +4690,19 @@ if dashboard_mode == "Daily Market Command Center":
             breadth,
         )
 
-        card_class = "orange-card"
-
         if regime["regime"] in [
             "Strong Bullish",
             "Bullish",
         ]:
-            card_class = "green-card"
-
+            regime_class = "green-card"
         elif regime["regime"] == "Defensive":
-            card_class = "red-card"
+            regime_class = "red-card"
+        else:
+            regime_class = "orange-card"
 
         st.markdown(
             f"""
-            <div class="research-card {card_class}">
+            <div class="research-card {regime_class}">
                 <h3>Market Regime: {regime["regime"]}</h3>
                 <p>
                     Nifty 50 Trend: {regime["nifty_trend"]} |
@@ -4178,7 +4795,7 @@ if dashboard_mode == "Daily Market Command Center":
                 use_container_width=True,
             )
 
-            selected_stock = st.selectbox(
+            candidate_symbol = st.selectbox(
                 "Open detailed Stock Research",
                 top_candidates["Stock"].tolist(),
                 key="command_open_stock",
@@ -4189,13 +4806,13 @@ if dashboard_mode == "Daily Market Command Center":
                 key="command_open_button",
             ):
                 open_stock_research(
-                    selected_stock
+                    candidate_symbol
                 )
                 st.rerun()
 
         else:
             st.info(
-                "No stocks meet the selected Winner Score threshold."
+                "No stocks meet selected Winner Score."
             )
 
         st.divider()
@@ -4245,6 +4862,7 @@ if dashboard_mode == "Daily Market Command Center":
                 hide_index=True,
                 use_container_width=True,
             )
+
         else:
             st.info(
                 "No confirmed bullish breakouts found."
@@ -4308,9 +4926,10 @@ if dashboard_mode == "Daily Market Command Center":
                 hide_index=True,
                 use_container_width=True,
             )
+
         else:
             st.info(
-                "No bullish stocks are currently near ideal entry zones."
+                "No current bullish ideal-entry setups."
             )
 
         st.divider()
@@ -4365,137 +4984,10 @@ if dashboard_mode == "Daily Market Command Center":
                 hide_index=True,
                 use_container_width=True,
             )
+
         else:
             st.info(
                 "No extended bullish setups found."
-            )
-
-        st.divider()
-
-        st.subheader(
-            "🚨 Risk Alerts"
-        )
-
-        risk_alert_rows = []
-
-        for _, row in command_results.iterrows():
-            current_price = safe_number(
-                row["Current Price"]
-            )
-
-            ma20 = safe_number(
-                row["MA20"]
-            )
-
-            risk_reward = safe_number(
-                row["Risk Reward"]
-            )
-
-            if (
-                current_price is not None
-                and ma20 is not None
-                and current_price < ma20
-            ):
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Price below Daily 20 DMA",
-                        "Details": (
-                            f"Price {format_price(current_price)} is below "
-                            f"MA20 {format_price(ma20)}."
-                        ),
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-            if row["Weekly Trend"] == "Bearish":
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Weekly Trend Bearish",
-                        "Details": "Weekly trend is Bearish.",
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-            if row["Monthly Trend"] == "Bearish":
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Monthly Trend Bearish",
-                        "Details": "Monthly trend is Bearish.",
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-            if (
-                row["Pattern Status"] == "Confirmed"
-                and row["Pattern Direction"] == "Bearish"
-            ):
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Confirmed Bearish Pattern",
-                        "Details": (
-                            f"{row['Current Pattern']} confirmed on "
-                            f"{row['Pattern Timeframe']}."
-                        ),
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-            if row["RS Status"] == "Weak":
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Weak Relative Strength",
-                        "Details": "Stock is underperforming Nifty 50.",
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-            if (
-                risk_reward is not None
-                and risk_reward < 1.5
-                and row["Pattern Direction"] == "Bullish"
-            ):
-                risk_alert_rows.append(
-                    {
-                        "Stock": row["Stock"],
-                        "Risk Alert": "Low Risk / Reward",
-                        "Details": (
-                            f"Current rule-based R/R: 1 : {risk_reward:.2f}"
-                        ),
-                        "Winner Score": row[
-                            "Winner Score"
-                        ],
-                    }
-                )
-
-        if risk_alert_rows:
-            st.dataframe(
-                pd.DataFrame(
-                    risk_alert_rows
-                ).sort_values(
-                    by="Winner Score",
-                    ascending=False,
-                ),
-                hide_index=True,
-                use_container_width=True,
-            )
-        else:
-            st.success(
-                "No major rule-based risk alerts found."
             )
 
 
@@ -4510,18 +5002,18 @@ elif dashboard_mode == "Stock Research":
         stock_universe["Symbol"].tolist()
     )
 
-    stored_symbol = st.session_state.get(
+    current_symbol = st.session_state.get(
         "selected_symbol",
         "RELIANCE",
     )
 
-    if stored_symbol not in symbols:
-        stored_symbol = symbols[0]
+    if current_symbol not in symbols:
+        current_symbol = symbols[0]
 
     selected_symbol = st.selectbox(
         "Search a Nifty Total Market stock",
         symbols,
-        index=symbols.index(stored_symbol),
+        index=symbols.index(current_symbol),
         key="stock_research_symbol",
     )
 
@@ -4530,7 +5022,8 @@ elif dashboard_mode == "Stock Research":
     )
 
     selected_record = stock_universe[
-        stock_universe["Symbol"] == selected_symbol
+        stock_universe["Symbol"]
+        == selected_symbol
     ].iloc[0]
 
     with st.spinner(
@@ -4547,15 +5040,17 @@ elif dashboard_mode == "Stock Research":
 
     if stock_data.empty:
         st.error(
-            "No price data available for this stock."
+            "Price data unavailable for this stock."
         )
         st.stop()
 
     daily_data = stock_data
+
     weekly_data = resample_ohlcv(
         stock_data,
         "Weekly",
     )
+
     monthly_data = resample_ohlcv(
         stock_data,
         "Monthly",
@@ -4564,9 +5059,11 @@ elif dashboard_mode == "Stock Research":
     daily_patterns = detect_patterns(
         daily_data
     )
+
     weekly_patterns = detect_patterns(
         weekly_data
     )
+
     monthly_patterns = detect_patterns(
         monthly_data
     )
@@ -4732,9 +5229,9 @@ elif dashboard_mode == "Stock Research":
             },
         )
 
-        positive_col, risk_col = st.columns(2)
+        left_col, right_col = st.columns(2)
 
-        with positive_col:
+        with left_col:
             st.markdown("### Positive Evidence")
 
             if winner_score["positives"]:
@@ -4742,10 +5239,10 @@ elif dashboard_mode == "Stock Research":
                     st.success(f"✅ {item}")
             else:
                 st.info(
-                    "No positive evidence identified."
+                    "No positive rule-based evidence found."
                 )
 
-        with risk_col:
+        with right_col:
             st.markdown("### Risk Flags")
 
             if winner_score["risks"]:
@@ -4753,7 +5250,7 @@ elif dashboard_mode == "Stock Research":
                     st.warning(f"⚠️ {item}")
             else:
                 st.success(
-                    "No significant rule-based risk flags."
+                    "No major rule-based risks found."
                 )
 
     with technical_tab:
@@ -4790,19 +5287,19 @@ elif dashboard_mode == "Stock Research":
                     data
                 )
 
-                c1, c2, c3 = st.columns(3)
+                t1, t2, t3 = st.columns(3)
 
-                c1.metric(
+                t1.metric(
                     "Trend",
                     calculate_overall_trend(data),
                 )
 
-                c2.metric(
+                t2.metric(
                     "Support",
                     format_price(support),
                 )
 
-                c3.metric(
+                t3.metric(
                     "Resistance",
                     format_price(resistance),
                 )
@@ -4815,7 +5312,7 @@ elif dashboard_mode == "Stock Research":
                     )
                 else:
                     st.info(
-                        "No supported active pattern found."
+                        "No supported active pattern detected."
                     )
 
                 st.plotly_chart(
@@ -4939,7 +5436,7 @@ elif dashboard_mode == "Stock Research":
             "Risk / Reward and Position Sizing"
         )
 
-        timeframe = st.selectbox(
+        selected_timeframe = st.selectbox(
             "Timeframe",
             [
                 "Daily",
@@ -4949,10 +5446,10 @@ elif dashboard_mode == "Stock Research":
             key="risk_timeframe",
         )
 
-        if timeframe == "Daily":
+        if selected_timeframe == "Daily":
             plan_data = daily_data
             plan_patterns = daily_patterns
-        elif timeframe == "Weekly":
+        elif selected_timeframe == "Weekly":
             plan_data = weekly_data
             plan_patterns = weekly_patterns
         else:
@@ -4982,67 +5479,67 @@ elif dashboard_mode == "Stock Research":
                 )
             ]
 
-            selected_label = st.selectbox(
+            chosen_label = st.selectbox(
                 "Detected pattern",
                 labels,
                 key="risk_pattern",
             )
 
-            selected_index = labels.index(
-                selected_label
+            chosen_index = labels.index(
+                chosen_label
             )
 
             plan = calculate_trade_plan(
                 plan_data,
-                directional_patterns[selected_index],
+                directional_patterns[chosen_index],
             )
 
-            t1, t2, t3, t4 = st.columns(4)
+            p1, p2, p3, p4 = st.columns(4)
 
-            t1.metric(
+            p1.metric(
                 "Current Price",
                 format_price(
                     plan["current_price"]
                 ),
             )
 
-            t2.metric(
+            p2.metric(
                 "Breakout / Neckline",
                 format_price(
                     plan["breakout_level"]
                 ),
             )
 
-            t3.metric(
+            p3.metric(
                 "ATR",
                 format_price(plan["atr"]),
             )
 
-            t4.metric(
+            p4.metric(
                 "Entry Quality",
                 plan["entry_quality"]["status"],
             )
 
-            t5, t6, t7, t8 = st.columns(4)
+            p5, p6, p7, p8 = st.columns(4)
 
-            t5.metric(
+            p5.metric(
                 "Support",
                 format_price(plan["support"]),
             )
 
-            t6.metric(
+            p6.metric(
                 "Stop Loss",
                 format_price(
                     plan["selected_stop"]
                 ),
             )
 
-            t7.metric(
+            p7.metric(
                 "Target",
                 format_price(plan["target"]),
             )
 
-            t8.metric(
+            p8.metric(
                 "Risk / Reward",
                 (
                     f"1 : {plan['risk_reward']:.2f}"
@@ -5113,7 +5610,7 @@ elif dashboard_mode == "Stock Research":
 
         else:
             st.info(
-                "No directional pattern is available for this timeframe."
+                "No directional pattern available for selected timeframe."
             )
 
     with fundamentals_tab:
@@ -5145,13 +5642,12 @@ elif dashboard_mode == "Stock Research":
             fundamentals.get("earningsGrowth")
         )
 
-        debt_equity = fundamentals.get(
-            "debtToEquity",
-            "Not available",
-        )
-
         eps = safe_number(
             fundamentals.get("trailingEps")
+        )
+
+        free_cashflow = safe_number(
+            fundamentals.get("freeCashflow")
         )
 
         fundamental_table = pd.DataFrame(
@@ -5241,13 +5737,24 @@ elif dashboard_mode == "Stock Research":
                 ],
                 [
                     "Debt / Equity",
-                    debt_equity,
+                    fundamentals.get(
+                        "debtToEquity",
+                        "Not available",
+                    ),
                 ],
                 [
                     "EPS",
                     (
                         f"₹{eps:.2f}"
                         if eps is not None
+                        else "Not available"
+                    ),
+                ],
+                [
+                    "Free Cash Flow",
+                    (
+                        f"₹{free_cashflow / 10000000:,.0f} Cr"
+                        if free_cashflow is not None
                         else "Not available"
                     ),
                 ],
@@ -5274,9 +5781,9 @@ elif dashboard_mode == "Winner Ranking Scanner":
         "Winner Ranking Scanner"
     )
 
-    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3)
 
-    with filter_col1:
+    with col1:
         scanner_pattern = st.selectbox(
             "Pattern",
             PATTERN_OPTIONS,
@@ -5305,7 +5812,7 @@ elif dashboard_mode == "Winner Ranking Scanner":
             key="scanner_status",
         )
 
-    with filter_col2:
+    with col2:
         scanner_trend = st.selectbox(
             "Overall Trend",
             TREND_OPTIONS,
@@ -5324,7 +5831,7 @@ elif dashboard_mode == "Winner Ranking Scanner":
             key="scanner_alignment",
         )
 
-    with filter_col3:
+    with col3:
         scanner_min_score = st.slider(
             "Minimum Winner Score",
             min_value=0,
@@ -5398,66 +5905,66 @@ elif dashboard_mode == "Winner Ranking Scanner":
         )
 
     else:
-        filtered_results = scanner_results.copy()
+        filtered = scanner_results.copy()
 
-        filtered_results = filtered_results[
-            filtered_results["Winner Score"]
+        filtered = filtered[
+            filtered["Winner Score"]
             >= scanner_min_score
         ]
 
         if scanner_category != "Any":
-            filtered_results = filtered_results[
-                filtered_results["Winner Category"]
+            filtered = filtered[
+                filtered["Winner Category"]
                 == scanner_category
             ]
 
         if scanner_rs != "Any":
-            filtered_results = filtered_results[
-                filtered_results["RS Status"]
+            filtered = filtered[
+                filtered["RS Status"]
                 == scanner_rs
             ]
 
         if scanner_alignment != "Any":
-            filtered_results = filtered_results[
-                filtered_results["MTF Alignment"]
+            filtered = filtered[
+                filtered["MTF Alignment"]
                 == scanner_alignment
             ]
 
         if scanner_pattern != "Any":
-            filtered_results = filtered_results[
-                filtered_results["Current Pattern"]
+            filtered = filtered[
+                filtered["Current Pattern"]
                 == scanner_pattern
             ]
 
         if scanner_status != "Any":
-            filtered_results = filtered_results[
-                filtered_results["Pattern Status"]
+            filtered = filtered[
+                filtered["Pattern Status"]
                 == scanner_status
             ]
 
         if scanner_timeframe != "Any":
-            filtered_results = filtered_results[
-                filtered_results["Pattern Timeframe"]
+            filtered = filtered[
+                filtered["Pattern Timeframe"]
                 == scanner_timeframe
             ]
 
         if scanner_trend != "Any":
-            filtered_results = filtered_results[
+            filtered = filtered[
                 (
-                    filtered_results["Daily Trend"]
+                    filtered["Daily Trend"]
                     == scanner_trend
                 )
                 | (
-                    filtered_results["Weekly Trend"]
+                    filtered["Weekly Trend"]
                     == scanner_trend
                 )
                 | (
-                    filtered_results["Monthly Trend"]
+                    filtered["Monthly Trend"]
                     == scanner_trend
                 )
             ]
 
-        filtered_results = filtered_results.sort_values(
+        filtered = filtered.sort_values(
             by=[
                 "Winner Score",
                 "MTF Score",
@@ -5471,17 +5978,17 @@ elif dashboard_mode == "Winner Ranking Scanner":
         )
 
         st.subheader(
-            f"Ranked Results: {len(filtered_results)}"
+            f"Ranked Results: {len(filtered)}"
         )
 
-        if filtered_results.empty:
+        if filtered.empty:
             st.info(
                 "No stocks match all selected filters."
             )
 
         else:
             st.dataframe(
-                filtered_results[
+                filtered[
                     [
                         "Stock",
                         "Company",
@@ -5508,22 +6015,22 @@ elif dashboard_mode == "Winner Ranking Scanner":
                 use_container_width=True,
             )
 
-            selected_stock = st.selectbox(
+            stock_to_open = st.selectbox(
                 "Open detailed Stock Research",
-                filtered_results["Stock"].tolist(),
-                key="scanner_research_stock",
+                filtered["Stock"].tolist(),
+                key="scanner_stock_to_open",
             )
 
             if st.button(
                 "Open Selected Stock Research",
-                key="scanner_open_button",
+                key="scanner_open_stock",
             ):
                 open_stock_research(
-                    selected_stock
+                    stock_to_open
                 )
                 st.rerun()
 
-            ranking_csv = filtered_results.to_csv(
+            ranking_csv = filtered.to_csv(
                 index=False
             ).encode("utf-8")
 
@@ -5536,52 +6043,61 @@ elif dashboard_mode == "Winner Ranking Scanner":
 
 
 # =============================================================================
-# OPTIMIZED HISTORICAL FILTER STUDY
+# HISTORICAL FILTER STUDY WITH LIVE / TODAY TAB
 # =============================================================================
 
 elif dashboard_mode == "Historical Filter Study":
     st.subheader(
-        "Optimized Historical Filter Study"
+        "Historical Filter Study"
     )
 
-    st.markdown(
-        """
-        This study tests your technical filter over the past five years.
-
-        **Every qualifying daily signal is included.**
-
-        If the same stock passes all conditions on three consecutive days,
-        it produces three separate records, each with a next-trading-day
-        entry and its own future return measurements.
-        """
+    historical_tab, live_tab = st.tabs(
+        [
+            "Historical 5-Year Study",
+            "Live / Today Filter Scan",
+        ]
     )
 
-    st.markdown(
-        """
-        ### Historical technical conditions
+    # =========================================================================
+    # HISTORICAL TAB — UNCHANGED CLOSING-PRICE LOGIC
+    # =========================================================================
 
-        | Condition | Status |
-        |---|---|
-        | Daily Volume > 1.5 × 5D Volume SMA | Evaluated |
-        | Daily candle return > 2% | Evaluated |
-        | Daily Close > 20 DMA | Evaluated |
-        | Daily Close > 200 DMA | Evaluated |
-        | Weekly Close > Weekly SMA20 | Evaluated |
-        | ATR14 / Daily Close > 3% | Evaluated |
-        | Daily RSI14 between 55 and 90 | Evaluated |
-        | Weekly RSI14 >= 55 | Evaluated |
-        | Daily Close > prior-day Close | Evaluated |
-        | Daily Close > two-days-ago Close | Evaluated |
-        | Current Market Cap > ₹3,000 Cr | Applied as current eligibility |
-        | Historical Debt/Equity < 1 | Not evaluated in Option B |
-        | Historical EPS > 0 | Not evaluated in Option B |
-        | Historical ROE > 10% | Not evaluated in Option B |
-        """
-    )
+    with historical_tab:
+        st.markdown(
+            """
+            ### Historical 5-Year Technical Filter Study
 
-    configuration_col1, configuration_col2 = st.columns(2)
+            This is the existing closing-price study. It is intentionally
+            unchanged.
 
-    with configuration_col1:
+            - Historical filters use completed daily candles only.
+            - Signal is generated only after daily close.
+            - Entry is on next available trading-day adjusted close.
+            - Every repeated daily signal is included.
+            - Incomplete future return windows display as `NA`.
+            """
+        )
+
+        st.markdown(
+            """
+            | Historical Condition | Status |
+            |---|---|
+            | Daily Volume > 1.5 × 5D Volume SMA | Evaluated |
+            | Daily candle return > 2% | Evaluated |
+            | Daily Close > 20 DMA | Evaluated |
+            | Daily Close > 200 DMA | Evaluated |
+            | Weekly Close > Weekly SMA20 | Evaluated |
+            | ATR14 / Daily Close > 3% | Evaluated |
+            | Daily RSI14 between 55 and 90 | Evaluated |
+            | Weekly RSI14 >= 55 | Evaluated |
+            | Daily Close > previous-day Close | Evaluated |
+            | Daily Close > two-days-ago Close | Evaluated |
+            | Historical Debt/Equity < 1 | Not evaluated in Option B |
+            | Historical EPS > 0 | Not evaluated in Option B |
+            | Historical ROE > 10% | Not evaluated in Option B |
+            """
+        )
+
         historical_scan_limit = st.selectbox(
             "Stocks to evaluate",
             [
@@ -5596,397 +6112,630 @@ elif dashboard_mode == "Historical Filter Study":
             key="historical_scan_limit",
         )
 
-    with configuration_col2:
-        st.metric(
-            "Signal counting",
-            "Every qualifying day",
-        )
-
-        st.metric(
-            "Repeated-signal gap",
-            "0 trading days",
-        )
-
-    st.info(
-        "This optimized version calculates historical indicators once per "
-        "stock and includes every qualifying signal date. Consecutive signals "
-        "are intentionally retained for evaluating the daily screener logic."
-    )
-
-    st.warning(
-        "Start with 20 or 50 stocks on free Streamlit Cloud. "
-        "The optimized calculation is faster, but downloading five years "
-        "of price data for hundreds of stocks can still take time."
-    )
-
-    if st.button(
-        "▶ Run Optimized Historical Filter Study",
-        type="primary",
-    ):
-        progress_bar = st.progress(0)
-        progress_text = st.empty()
-
-        def historical_progress(
-            position,
-            total,
-            symbol,
-        ):
-            progress_bar.progress(
-                position / total
-            )
-
-            progress_text.caption(
-                f"Evaluating {position:,} of {total:,}: {symbol}"
-            )
-
-        with st.spinner(
-            "Calculating historical technical signals and future outcomes..."
-        ):
-            results = run_optimized_historical_filter_study(
-                universe=stock_universe,
-                minimum_market_cap=minimum_market_cap,
-                scan_limit=historical_scan_limit,
-                progress_callback=historical_progress,
-            )
-
-        progress_bar.empty()
-        progress_text.empty()
-
-        st.session_state[
-            "historical_filter_results"
-        ] = results
-
-        st.session_state[
-            "historical_filter_settings"
-        ] = {
-            "minimum_market_cap": minimum_market_cap,
-            "scan_limit": historical_scan_limit,
-        }
-
-    historical_results = st.session_state[
-        "historical_filter_results"
-    ]
-
-    if historical_results is None or historical_results.empty:
         st.info(
-            "Click Run Optimized Historical Filter Study to begin."
+            "Every qualifying day is retained. If a stock passes on "
+            "three consecutive trading days, all three dates appear as "
+            "separate historical records."
         )
 
-    else:
-        summary = calculate_optimized_study_summary(
-            historical_results
-        )
+        if st.button(
+            "▶ Run Historical 5-Year Study",
+            type="primary",
+        ):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
 
-        settings = st.session_state[
-            "historical_filter_settings"
+            def historical_progress(
+                position,
+                total,
+                symbol,
+            ):
+                progress_bar.progress(
+                    position / total
+                )
+
+                progress_text.caption(
+                    f"Evaluating {position:,} of {total:,}: {symbol}"
+                )
+
+            results = run_optimized_historical_filter_study(
+                stock_universe,
+                minimum_market_cap,
+                historical_scan_limit,
+                historical_progress,
+            )
+
+            progress_bar.empty()
+            progress_text.empty()
+
+            st.session_state[
+                "historical_filter_results"
+            ] = results
+
+            st.session_state[
+                "historical_filter_settings"
+            ] = {
+                "minimum_market_cap": minimum_market_cap,
+                "scan_limit": historical_scan_limit,
+            }
+
+        historical_results = st.session_state[
+            "historical_filter_results"
         ]
 
-        st.divider()
+        if historical_results is None or historical_results.empty:
+            st.info(
+                "Click Run Historical 5-Year Study to generate results."
+            )
 
-        st.markdown(
-            f"""
-            <div class="research-card blue-card">
-                <h3>Historical Study Configuration</h3>
-                <p>
-                    Current Market Cap Eligibility:
-                    Above ₹{settings.get("minimum_market_cap", 3000):,.0f} Cr |
-                    Stocks Evaluated:
-                    {settings.get("scan_limit", 50)} |
-                    Signal Counting: Every qualifying day |
-                    Signal Gap: 0 trading days
-                </p>
-                <p>
-                    Entry Date: Next available trading day |
-                    Entry Price: Next available trading day's adjusted close |
-                    Historical Debt/Equity, EPS and ROE: Not evaluated
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        else:
+            summary = calculate_historical_study_summary(
+                historical_results
+            )
 
-        summary_col1, summary_col2, summary_col3, summary_col4, summary_col5 = (
-            st.columns(5)
-        )
+            settings = st.session_state[
+                "historical_filter_settings"
+            ]
 
-        summary_col1.metric(
-            "Total Signal Records",
-            summary["total_signal_records"],
-        )
+            st.markdown(
+                f"""
+                <div class="research-card blue-card">
+                    <h3>Historical Study Configuration</h3>
+                    <p>
+                        Current Market Cap Eligibility:
+                        Above ₹{settings.get("minimum_market_cap", 3000):,.0f} Cr |
+                        Stocks Evaluated:
+                        {settings.get("scan_limit", 50)} |
+                        Signal Counting: Every qualifying day |
+                        Signal Gap: 0 trading days
+                    </p>
+                    <p>
+                        Entry: Next available trading-day adjusted close |
+                        Historical Debt/Equity, EPS and ROE: Not evaluated
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        summary_col2.metric(
-            "Unique Stocks",
-            summary["unique_stocks"],
-        )
+            h1, h2, h3, h4, h5 = st.columns(5)
 
-        summary_col3.metric(
-            "Unique Stock-Months",
-            summary["unique_stock_months"],
-        )
+            h1.metric(
+                "Total Signal Records",
+                summary["total_signal_records"],
+            )
 
-        summary_col4.metric(
-            "Unique Stock-Quarters",
-            summary["unique_stock_quarters"],
-        )
+            h2.metric(
+                "Unique Stocks",
+                summary["unique_stocks"],
+            )
 
-        summary_col5.metric(
-            "Consecutive Signal Records",
-            summary["consecutive_signal_records"],
-        )
+            h3.metric(
+                "Unique Stock-Months",
+                summary["unique_stock_months"],
+            )
 
-        st.caption(
-            "Consecutive Signal Records estimates repeated signals from the same "
-            "stock on nearby trading dates. They are included intentionally, "
-            "because this study measures the effectiveness of the screener on "
-            "every qualifying day."
-        )
+            h4.metric(
+                "Unique Stock-Quarters",
+                summary["unique_stock_quarters"],
+            )
 
-        st.subheader(
-            "Forward Outcome Summary"
-        )
+            h5.metric(
+                "Consecutive Signal Records",
+                summary["consecutive_signal_records"],
+            )
 
-        st.dataframe(
-            summary["horizon_summary"],
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "Average Max Return %": st.column_config.NumberColumn(
-                    "Average Max Return",
-                    format="%.2f%%",
-                ),
-                "Median Max Return %": st.column_config.NumberColumn(
-                    "Median Max Return",
-                    format="%.2f%%",
-                ),
-                "Average Min Return %": st.column_config.NumberColumn(
-                    "Average Min Return",
-                    format="%.2f%%",
-                ),
-                "Median Min Return %": st.column_config.NumberColumn(
-                    "Median Min Return",
-                    format="%.2f%%",
-                ),
-                "10% Hit Rate %": st.column_config.NumberColumn(
-                    "10% Hit Rate",
-                    format="%.2f%%",
-                ),
-            },
-        )
+            st.subheader(
+                "Forward Outcome Summary"
+            )
 
-        st.subheader(
-            "Historical Signals by Year"
-        )
-
-        if not summary["year_summary"].empty:
             st.dataframe(
-                summary["year_summary"],
+                summary["horizon_summary"],
                 hide_index=True,
                 use_container_width=True,
                 column_config={
-                    "average_max_ret_30d": st.column_config.NumberColumn(
-                        "Average Max Return 30D",
+                    "Average Max Return %": st.column_config.NumberColumn(
+                        "Average Max Return",
                         format="%.2f%%",
                     ),
-                    "median_max_ret_30d": st.column_config.NumberColumn(
-                        "Median Max Return 30D",
+                    "Median Max Return %": st.column_config.NumberColumn(
+                        "Median Max Return",
                         format="%.2f%%",
                     ),
-                    "hit_10pct_30d_rate": st.column_config.NumberColumn(
-                        "10% Hit Rate 30D",
+                    "Average Min Return %": st.column_config.NumberColumn(
+                        "Average Min Return",
                         format="%.2f%%",
                     ),
-                    "average_max_ret_60d": st.column_config.NumberColumn(
-                        "Average Max Return 60D",
+                    "Median Min Return %": st.column_config.NumberColumn(
+                        "Median Min Return",
                         format="%.2f%%",
                     ),
-                    "median_max_ret_60d": st.column_config.NumberColumn(
-                        "Median Max Return 60D",
-                        format="%.2f%%",
-                    ),
-                    "hit_10pct_60d_rate": st.column_config.NumberColumn(
-                        "10% Hit Rate 60D",
+                    "10% Hit Rate %": st.column_config.NumberColumn(
+                        "10% Hit Rate",
                         format="%.2f%%",
                     ),
                 },
             )
 
-        st.subheader(
-            "Individual Historical Signal Records"
-        )
-
-        display_columns = [
-            "stock_symbol",
-            "stock_name",
-            "signal_date",
-            "signal_day_price",
-            "entry_date",
-            "entry_price",
-            "daily_candle_return_pct",
-            "volume_ratio_vs_5d_sma",
-            "daily_rsi_14",
-            "weekly_rsi_14",
-            "atr_14_pct_of_close",
-            "max_ret_5d",
-            "hit_10pct_5d",
-            "max_ret_10d",
-            "hit_10pct_10d",
-            "max_ret_20d",
-            "hit_10pct_20d",
-            "max_ret_30d",
-            "min_ret_30d",
-            "hit_10pct_30d",
-            "max_ret_60d",
-            "min_ret_60d",
-            "hit_10pct_60d",
-            "max_ret_90d",
-            "min_ret_90d",
-            "hit_10pct_90d",
-            "max_ret_6m",
-            "min_ret_6m",
-            "hit_10pct_6m",
-            "max_ret_9m",
-            "hit_10pct_9m",
-            "max_ret_12m",
-            "min_ret_12m",
-            "hit_10pct_12m",
-        ]
-
-        display_data = historical_results[
-            display_columns
-        ].copy()
-
-        st.dataframe(
-            display_data,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "signal_date": st.column_config.DatetimeColumn(
-                    "Signal Date",
-                    format="YYYY-MM-DD",
-                ),
-                "entry_date": st.column_config.DatetimeColumn(
-                    "Entry Date",
-                    format="YYYY-MM-DD",
-                ),
-                "signal_day_price": st.column_config.NumberColumn(
-                    "Signal-Day Price",
-                    format="₹%.2f",
-                ),
-                "entry_price": st.column_config.NumberColumn(
-                    "Entry Price",
-                    format="₹%.2f",
-                ),
-                "daily_candle_return_pct": st.column_config.NumberColumn(
-                    "Daily Candle %",
-                    format="%.2f%%",
-                ),
-                "volume_ratio_vs_5d_sma": st.column_config.NumberColumn(
-                    "Volume / 5D SMA",
-                    format="%.2fx",
-                ),
-                "daily_rsi_14": st.column_config.NumberColumn(
-                    "Daily RSI",
-                    format="%.2f",
-                ),
-                "weekly_rsi_14": st.column_config.NumberColumn(
-                    "Weekly RSI",
-                    format="%.2f",
-                ),
-                "atr_14_pct_of_close": st.column_config.NumberColumn(
-                    "ATR / Close",
-                    format="%.2f%%",
-                ),
-                "max_ret_5d": st.column_config.NumberColumn(
-                    "Max Ret 5D",
-                    format="%.2f%%",
-                ),
-                "max_ret_10d": st.column_config.NumberColumn(
-                    "Max Ret 10D",
-                    format="%.2f%%",
-                ),
-                "max_ret_20d": st.column_config.NumberColumn(
-                    "Max Ret 20D",
-                    format="%.2f%%",
-                ),
-                "max_ret_30d": st.column_config.NumberColumn(
-                    "Max Ret 30D",
-                    format="%.2f%%",
-                ),
-                "min_ret_30d": st.column_config.NumberColumn(
-                    "Min Ret 30D",
-                    format="%.2f%%",
-                ),
-                "max_ret_60d": st.column_config.NumberColumn(
-                    "Max Ret 60D",
-                    format="%.2f%%",
-                ),
-                "min_ret_60d": st.column_config.NumberColumn(
-                    "Min Ret 60D",
-                    format="%.2f%%",
-                ),
-                "max_ret_90d": st.column_config.NumberColumn(
-                    "Max Ret 90D",
-                    format="%.2f%%",
-                ),
-                "min_ret_90d": st.column_config.NumberColumn(
-                    "Min Ret 90D",
-                    format="%.2f%%",
-                ),
-                "max_ret_6m": st.column_config.NumberColumn(
-                    "Max Ret 6M",
-                    format="%.2f%%",
-                ),
-                "min_ret_6m": st.column_config.NumberColumn(
-                    "Min Ret 6M",
-                    format="%.2f%%",
-                ),
-                "max_ret_9m": st.column_config.NumberColumn(
-                    "Max Ret 9M",
-                    format="%.2f%%",
-                ),
-                "max_ret_12m": st.column_config.NumberColumn(
-                    "Max Ret 12M",
-                    format="%.2f%%",
-                ),
-                "min_ret_12m": st.column_config.NumberColumn(
-                    "Min Ret 12M",
-                    format="%.2f%%",
-                ),
-            },
-        )
-
-        study_csv = historical_results.to_csv(
-            index=False
-        ).encode("utf-8")
-
-        st.download_button(
-            "⬇️ Download Optimized Historical Study CSV",
-            data=study_csv,
-            file_name="nifty_optimized_historical_filter_study.csv",
-            mime="text/csv",
-        )
-
-        signal_stocks = sorted(
-            historical_results[
-                "stock_symbol"
-            ].unique().tolist()
-        )
-
-        if signal_stocks:
-            selected_signal_stock = st.selectbox(
-                "Open Stock Research for qualifying stock",
-                signal_stocks,
-                key="historical_open_stock",
+            st.subheader(
+                "Historical Signals by Year"
             )
 
-            if st.button(
-                "Open Selected Stock Research",
-                key="historical_open_button",
-            ):
-                open_stock_research(
-                    selected_signal_stock
+            if not summary["year_summary"].empty:
+                st.dataframe(
+                    summary["year_summary"],
+                    hide_index=True,
+                    use_container_width=True,
                 )
-                st.rerun()
+
+            st.subheader(
+                "Individual Historical Signal Records"
+            )
+
+            historical_display_columns = [
+                "stock_symbol",
+                "stock_name",
+                "signal_date",
+                "signal_day_price",
+                "entry_date",
+                "entry_price",
+                "daily_candle_return_pct",
+                "volume_ratio_vs_5d_sma",
+                "daily_rsi_14",
+                "weekly_rsi_14",
+                "atr_14_pct_of_close",
+                "max_ret_5d",
+                "hit_10pct_5d",
+                "max_ret_10d",
+                "hit_10pct_10d",
+                "max_ret_20d",
+                "hit_10pct_20d",
+                "max_ret_30d",
+                "min_ret_30d",
+                "hit_10pct_30d",
+                "max_ret_60d",
+                "min_ret_60d",
+                "hit_10pct_60d",
+                "max_ret_90d",
+                "min_ret_90d",
+                "hit_10pct_90d",
+                "max_ret_6m",
+                "min_ret_6m",
+                "hit_10pct_6m",
+                "max_ret_9m",
+                "hit_10pct_9m",
+                "max_ret_12m",
+                "min_ret_12m",
+                "hit_10pct_12m",
+            ]
+
+            st.dataframe(
+                historical_results[
+                    historical_display_columns
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+
+            historical_csv = historical_results.to_csv(
+                index=False
+            ).encode("utf-8")
+
+            st.download_button(
+                "⬇️ Download Historical Study CSV",
+                data=historical_csv,
+                file_name="nifty_historical_filter_study.csv",
+                mime="text/csv",
+            )
+
+    # =========================================================================
+    # LIVE / TODAY FILTER SCAN — NEW INTRADAY LOGIC ONLY
+    # =========================================================================
+
+    with live_tab:
+        st.markdown(
+            """
+            ### Live / Today Filter Scan
+
+            This is a separate current-day scan.
+
+            - **Market Open:** latest intraday price and cumulative intraday
+              volume are used. Results are provisional.
+            - **Market Closed:** latest daily close and final daily volume
+              are used. Results are end-of-day confirmed.
+            - The Historical 5-Year Study above is not affected by this tab.
+            """
+        )
+
+        market_status = get_market_status()
+
+        if market_status["is_open"]:
+            live_card_class = "orange-card"
+            live_title = "⚠️ PROVISIONAL INTRADAY MODE"
+            live_message = (
+                "Current price and cumulative intraday volume are used. "
+                "A stock can pass now and fail by market close."
+            )
+        else:
+            live_card_class = "green-card"
+            live_title = "✅ END-OF-DAY CONFIRMED MODE"
+            live_message = (
+                "Latest daily close and final daily volume are used."
+            )
+
+        st.markdown(
+            f"""
+            <div class="research-card {live_card_class}">
+                <h3>{live_title}</h3>
+                <p>
+                    Market Status: {market_status["status"]} |
+                    Current IST Time:
+                    {market_status["now"].strftime("%Y-%m-%d %H:%M:%S")}
+                </p>
+                <p>{live_message}</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        live_col1, live_col2 = st.columns(2)
+
+        with live_col1:
+            live_scan_limit = st.selectbox(
+                "Stocks to evaluate for Live Scan",
+                [
+                    20,
+                    50,
+                    100,
+                    250,
+                    500,
+                    750,
+                ],
+                index=1,
+                key="live_scan_limit",
+            )
+
+        with live_col2:
+            auto_info = (
+                "Manual refresh is recommended. "
+                "Yahoo Finance intraday data is cached for 60 seconds."
+            )
+
+            st.info(auto_info)
+
+        st.warning(
+            "Intraday Yahoo Finance data can be delayed, incomplete, "
+            "or unavailable for some NSE stocks. If intraday data cannot "
+            "be fetched, the scan falls back to the latest daily data and "
+            "labels the result clearly."
+        )
+
+        if st.button(
+            "⚡ Run / Refresh Live Filter Scan",
+            type="primary",
+        ):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+
+            def live_progress(
+                position,
+                total,
+                symbol,
+            ):
+                progress_bar.progress(
+                    position / total
+                )
+
+                progress_text.caption(
+                    f"Checking {position:,} of {total:,}: {symbol}"
+                )
+
+            live_results = run_live_filter_scan(
+                universe=stock_universe,
+                minimum_market_cap=minimum_market_cap,
+                scan_limit=live_scan_limit,
+                market_open=market_status["is_open"],
+                progress_callback=live_progress,
+            )
+
+            progress_bar.empty()
+            progress_text.empty()
+
+            st.session_state[
+                "live_filter_results"
+            ] = live_results
+
+            st.session_state[
+                "live_filter_metadata"
+            ] = {
+                "market_status": market_status["status"],
+                "scan_timestamp": market_status["now"],
+                "scan_limit": live_scan_limit,
+                "market_open": market_status["is_open"],
+            }
+
+        live_results = st.session_state[
+            "live_filter_results"
+        ]
+
+        live_metadata = st.session_state[
+            "live_filter_metadata"
+        ]
+
+        if live_results is None or live_results.empty:
+            st.info(
+                "Click Run / Refresh Live Filter Scan to find "
+                "current stocks passing the technical filter."
+            )
+
+        else:
+            passed_results = live_results[
+                live_results["all_filters_pass"]
+            ].copy()
+
+            total_checked = len(live_results)
+            total_passed = len(passed_results)
+
+            latest_scan_time = live_metadata.get(
+                "scan_timestamp"
+            )
+
+            live_summary_col1, live_summary_col2, live_summary_col3, live_summary_col4 = (
+                st.columns(4)
+            )
+
+            live_summary_col1.metric(
+                "Stocks Checked",
+                total_checked,
+            )
+
+            live_summary_col2.metric(
+                "Stocks Passing All Filters",
+                total_passed,
+            )
+
+            live_summary_col3.metric(
+                "Market Status",
+                live_metadata.get(
+                    "market_status",
+                    "Unknown",
+                ),
+            )
+
+            live_summary_col4.metric(
+                "Scan Time IST",
+                (
+                    latest_scan_time.strftime(
+                        "%H:%M:%S"
+                    )
+                    if latest_scan_time is not None
+                    else "Not available"
+                ),
+            )
+
+            if market_status["is_open"]:
+                st.warning(
+                    "Passing stocks are provisional intraday signals. "
+                    "Re-run or verify after market close before treating "
+                    "them as completed daily signals."
+                )
+            else:
+                st.success(
+                    "The scan is using latest daily end-of-day values."
+                )
+
+            st.subheader(
+                "Stocks Passing All Live / Today Filter Conditions"
+            )
+
+            if passed_results.empty:
+                st.info(
+                    "No stocks currently pass every required technical condition."
+                )
+            else:
+                live_display_columns = [
+                    "stock_symbol",
+                    "stock_name",
+                    "industry",
+                    "market_status",
+                    "data_mode",
+                    "signal_status",
+                    "data_source",
+                    "signal_timestamp_ist",
+                    "latest_price",
+                    "today_open",
+                    "today_high",
+                    "today_low",
+                    "current_day_change_pct",
+                    "current_volume",
+                    "prior_5d_average_volume",
+                    "volume_ratio_vs_prior_5d",
+                    "daily_sma_20",
+                    "daily_sma_200",
+                    "weekly_close_or_live_price",
+                    "weekly_sma_20",
+                    "atr_14_pct",
+                    "daily_rsi_14",
+                    "weekly_rsi_14",
+                    "current_debt_equity_reference",
+                    "current_eps_reference",
+                    "current_roe_reference",
+                ]
+
+                st.dataframe(
+                    passed_results[
+                        live_display_columns
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "signal_timestamp_ist": st.column_config.DatetimeColumn(
+                            "Latest Data Timestamp",
+                            format="YYYY-MM-DD HH:mm:ss",
+                        ),
+                        "latest_price": st.column_config.NumberColumn(
+                            "Latest Price",
+                            format="₹%.2f",
+                        ),
+                        "today_open": st.column_config.NumberColumn(
+                            "Today Open",
+                            format="₹%.2f",
+                        ),
+                        "today_high": st.column_config.NumberColumn(
+                            "Today High",
+                            format="₹%.2f",
+                        ),
+                        "today_low": st.column_config.NumberColumn(
+                            "Today Low",
+                            format="₹%.2f",
+                        ),
+                        "current_day_change_pct": st.column_config.NumberColumn(
+                            "Day Change %",
+                            format="%.2f%%",
+                        ),
+                        "current_volume": st.column_config.NumberColumn(
+                            "Current Volume",
+                            format="%.0f",
+                        ),
+                        "prior_5d_average_volume": st.column_config.NumberColumn(
+                            "Prior 5D Avg Volume",
+                            format="%.0f",
+                        ),
+                        "volume_ratio_vs_prior_5d": st.column_config.NumberColumn(
+                            "Volume / Prior 5D",
+                            format="%.2fx",
+                        ),
+                        "daily_sma_20": st.column_config.NumberColumn(
+                            "Daily SMA20",
+                            format="₹%.2f",
+                        ),
+                        "daily_sma_200": st.column_config.NumberColumn(
+                            "Daily SMA200",
+                            format="₹%.2f",
+                        ),
+                        "weekly_close_or_live_price": st.column_config.NumberColumn(
+                            "Weekly Close / Live Price",
+                            format="₹%.2f",
+                        ),
+                        "weekly_sma_20": st.column_config.NumberColumn(
+                            "Weekly SMA20",
+                            format="₹%.2f",
+                        ),
+                        "atr_14_pct": st.column_config.NumberColumn(
+                            "ATR %",
+                            format="%.2f%%",
+                        ),
+                        "daily_rsi_14": st.column_config.NumberColumn(
+                            "Daily RSI14",
+                            format="%.2f",
+                        ),
+                        "weekly_rsi_14": st.column_config.NumberColumn(
+                            "Weekly RSI14",
+                            format="%.2f",
+                        ),
+                        "current_roe_reference": st.column_config.NumberColumn(
+                            "Current ROE",
+                            format="%.2f",
+                        ),
+                    },
+                )
+
+                live_csv = passed_results.to_csv(
+                    index=False
+                ).encode("utf-8")
+
+                st.download_button(
+                    "⬇️ Download Passing Live Filter Stocks CSV",
+                    data=live_csv,
+                    file_name="nifty_live_today_filter_scan.csv",
+                    mime="text/csv",
+                )
+
+                passing_symbols = passed_results[
+                    "stock_symbol"
+                ].tolist()
+
+                selected_live_symbol = st.selectbox(
+                    "Open Stock Research",
+                    passing_symbols,
+                    key="live_open_stock_symbol",
+                )
+
+                if st.button(
+                    "Open Selected Stock Research",
+                    key="live_open_stock_button",
+                ):
+                    open_stock_research(
+                        selected_live_symbol
+                    )
+                    st.rerun()
+
+            st.divider()
+
+            st.subheader(
+                "Live Filter Audit — All Evaluated Stocks"
+            )
+
+            st.caption(
+                "Use this table to understand why a stock did not pass."
+            )
+
+            audit_columns = [
+                "stock_symbol",
+                "stock_name",
+                "data_mode",
+                "latest_price",
+                "current_day_change_pct",
+                "volume_ratio_vs_prior_5d",
+                "daily_rsi_14",
+                "weekly_rsi_14",
+                "atr_14_pct",
+                "volume_condition",
+                "candle_change_condition",
+                "close_above_sma20",
+                "close_above_sma200",
+                "weekly_above_sma20",
+                "atr_condition",
+                "daily_rsi_condition",
+                "weekly_rsi_condition",
+                "close_above_1d",
+                "close_above_2d",
+                "all_filters_pass",
+            ]
+
+            st.dataframe(
+                live_results[
+                    audit_columns
+                ],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "latest_price": st.column_config.NumberColumn(
+                        "Latest Price",
+                        format="₹%.2f",
+                    ),
+                    "current_day_change_pct": st.column_config.NumberColumn(
+                        "Day Change %",
+                        format="%.2f%%",
+                    ),
+                    "volume_ratio_vs_prior_5d": st.column_config.NumberColumn(
+                        "Volume / Prior 5D",
+                        format="%.2fx",
+                    ),
+                    "daily_rsi_14": st.column_config.NumberColumn(
+                        "Daily RSI",
+                        format="%.2f",
+                    ),
+                    "weekly_rsi_14": st.column_config.NumberColumn(
+                        "Weekly RSI",
+                        format="%.2f",
+                    ),
+                    "atr_14_pct": st.column_config.NumberColumn(
+                        "ATR %",
+                        format="%.2f%%",
+                    ),
+                },
+            )
 
 
 # =============================================================================
@@ -5997,9 +6746,9 @@ st.divider()
 
 st.caption(
     "Data sources: Nifty Indices constituent list and Yahoo Finance. "
-    "The optimized Historical Filter Study calculates price, volume, SMA, "
-    "ATR and RSI indicators once per stock and includes every daily signal "
-    "that satisfies all technical conditions. Historical Debt/Equity, EPS "
-    "and ROE are not evaluated in Option B because dated financial filings "
-    "are required. Results are for research only and are not investment advice."
+    "Historical Filter Study uses completed daily closing-price data only "
+    "and is unchanged by the Live / Today Filter Scan. Live intraday results "
+    "are provisional during market hours and may change before close. "
+    "All indicators, patterns, rankings and filter results are for research "
+    "only and are not investment advice."
 )

@@ -125,6 +125,7 @@ DASHBOARD_MODES = [
     "Stock Research",
     "Winner Ranking Scanner",
     "Historical Filter Study",
+     "Gold & Silver Decision Hub",
 ]
 
 PATTERN_OPTIONS = [
@@ -189,6 +190,13 @@ RETURN_WINDOWS = {
     "12m": 252,
 }
 
+GOLD_ETF_TICKER = "GOLDBEES.NS"
+SILVER_ETF_TICKER = "SILVERBEES.NS"
+
+GOLD_FUTURES_TICKER = "GC=F"
+SILVER_FUTURES_TICKER = "SI=F"
+
+USD_INDEX_TICKER = "DX-Y.NYB"  # ICE U.S. Dollar Index
 
 # =============================================================================
 # SESSION STATE
@@ -4685,7 +4693,162 @@ def calculate_position_outlook(
     }
 
 
+def fetch_metals_data():
+    """
+    Fetch price data for gold & silver ETFs and futures.
+    Returns a dict with DataFrames and latest prices.
+    """
 
+    tickers = {
+        "gold_etf": GOLD_ETF_TICKER,
+        "silver_etf": SILVER_ETF_TICKER,
+        "gold_futures": GOLD_FUTURES_TICKER,
+        "silver_futures": SILVER_FUTURES_TICKER,
+        "usd_index": USD_INDEX_TICKER,
+    }
+
+    data = {}
+
+    for key, ticker in tickers.items():
+        try:
+            df = fetch_price_data(ticker, "5y")
+            data[key] = df
+        except Exception:
+            data[key] = pd.DataFrame()
+
+    result = {}
+
+    for key, df in data.items():
+        if df is not None and not df.empty:
+            latest_price = float(df["close"].iloc[-1])
+        else:
+            latest_price = None
+
+        result[key] = {
+            "data": df,
+            "latest_price": latest_price,
+        }
+
+    return result
+
+
+def calculate_metals_outlook(
+    etf_data,
+    futures_data,
+    usd_data,
+    metal_type,
+):
+    """
+    Calculate a simple outlook for gold or silver.
+    metal_type: 'gold' or 'silver'
+    """
+
+    etf_df = etf_data.get("data", pd.DataFrame())
+    futures_df = futures_data.get("data", pd.DataFrame())
+    usd_df = usd_data.get("data", pd.DataFrame())
+
+    if etf_df.empty:
+        return {
+            "outlook": "Insufficient data",
+            "stance": "Hold / No fresh calls",
+            "reasons": ["ETF price data unavailable."],
+        }
+
+    etf_trend = calculate_overall_trend(etf_df)
+    futures_trend = calculate_overall_trend(futures_df) if not futures_df.empty else "Unavailable"
+
+    etf_rsi = calculate_rsi(etf_df["close"], 14).iloc[-1] if not etf_df.empty else None
+
+    # USD trend (simplified)
+    if not usd_df.empty:
+        usd_trend = calculate_overall_trend(usd_df)
+    else:
+        usd_trend = "Unavailable"
+
+    reasons = []
+    score = 0
+
+    # Technical score
+    if etf_trend in ["Strong bullish", "Bullish"]:
+        score += 2
+        reasons.append(f"ETF trend is {etf_trend}")
+    elif etf_trend == "Bearish":
+        score -= 2
+        reasons.append(f"ETF trend is {etf_trend}")
+
+    if futures_trend in ["Strong bullish", "Bullish"]:
+        score += 2
+        reasons.append(f"Futures trend is {futures_trend}")
+    elif futures_trend == "Bearish":
+        score -= 2
+        reasons.append(f"Futures trend is {futures_trend}")
+
+    if etf_rsi is not None:
+        if etf_rsi < 40:
+            score += 1
+            reasons.append(f"ETF RSI is oversold ({etf_rsi:.1f})")
+        elif etf_rsi > 65:
+            score -= 1
+            reasons.append(f"ETF RSI is overbought ({etf_rsi:.1f})")
+
+    # Macro / fundamental context (static knowledge)
+    if metal_type == "gold":
+        reasons.append(
+            "Central banks have been net buyers of gold, supporting long-term demand."
+        )
+        if usd_trend == "Bearish":
+            score += 1
+            reasons.append("USD trend is bearish, typically supportive for gold")
+        elif usd_trend == "Strong bullish":
+            score -= 1
+            reasons.append("USD trend is strong, typically a headwind for gold")
+
+        reasons.append(
+            "Markets have been pricing in rate-cut expectations over the medium term, "
+            "which can be supportive for gold if real yields fall."
+        )
+
+    elif metal_type == "silver":
+        reasons.append(
+            "Silver has been in a multi-year supply deficit, with 2026 deficit "
+            "estimated around 46–67 million ounces."
+        )
+        reasons.append(
+            "Solar demand for silver is falling in 2026 due to thrifting, but "
+            "other industrial uses (EVs, AI, electronics) and investment demand "
+            "remain supportive."
+        )
+        reasons.append(
+            "Silver often moves with gold on monetary drivers but is more volatile "
+            "and more sensitive to industrial demand."
+        )
+
+        if etf_trend in ["Strong bullish", "Bullish"]:
+            score += 1
+            reasons.append("Bullish ETF trend supports accumulation on dips")
+
+    # Map score to stance
+    if score >= 3:
+        stance = "Accumulate on dips"
+    elif score >= 1:
+        stance = "Hold / Continue SIP"
+    elif score <= -2:
+        stance = "Trim on strength"
+    else:
+        stance = "Hold / No strong signal"
+
+    if score >= 2:
+        outlook = "Bullish"
+    elif score <= -2:
+        outlook = "Bearish"
+    else:
+        outlook = "Neutral"
+
+    return {
+        "outlook": outlook,
+        "stance": stance,
+        "reasons": reasons,
+    }
 
 
 # =============================================================================
@@ -6373,6 +6536,205 @@ elif dashboard_mode == "Historical Filter Study":
         ]
     )
 
+elif dashboard_mode == "Gold & Silver Decision Hub":
+    st.subheader("Gold & Silver Decision Hub")
+
+    st.markdown(
+        "This hub helps you decide whether it is a relatively good time to "
+        "buy more, hold, or trim Gold and Silver ETFs, based on technicals "
+        "and key macro/structural drivers."
+    )
+
+    with st.spinner("Loading metals data..."):
+        metals = fetch_metals_data()
+
+    gold_tab, silver_tab = st.tabs(["Gold", "Silver"])
+
+    # -------------------------
+    # GOLD TAB
+    # -------------------------
+    with gold_tab:
+        st.markdown("### Gold (Nippon Gold BeES + Global Benchmarks)")
+
+        gold_etf = metals.get("gold_etf", {})
+        gold_futures = metals.get("gold_futures", {})
+        usd_index = metals.get("usd_index", {})
+
+        gold_etf_price = gold_etf.get("latest_price")
+        gold_futures_price = gold_futures.get("latest_price")
+
+        g1, g2 = st.columns(2)
+
+        g1.metric(
+            "Nippon Gold BeES (GOLDBEES.NS)",
+            format_price(gold_etf_price) if gold_etf_price else "Not available",
+        )
+
+        g2.metric(
+            "COMEX Gold Futures (GC=F)",
+            f"${gold_futures_price:,.2f}" if gold_futures_price else "Not available",
+        )
+
+        gold_outlook = calculate_metals_outlook(
+            etf_data=gold_etf,
+            futures_data=gold_futures,
+            usd_data=usd_index,
+            metal_type="gold",
+        )
+
+        st.divider()
+
+        o1, o2 = st.columns(2)
+
+        o1.metric(
+            "Outlook (1–3 Months)",
+            gold_outlook["outlook"],
+        )
+
+        o2.metric(
+            "Suggested Stance",
+            gold_outlook["stance"],
+        )
+
+        if gold_outlook["reasons"]:
+            st.markdown("### Key Drivers")
+            for reason in gold_outlook["reasons"]:
+                st.write(f"- {reason}")
+
+        st.divider()
+
+        st.markdown("### Buying Zones (Guidance Only)")
+
+        if gold_etf.get("data") is not None and not gold_etf["data"].empty:
+            support, resistance = calculate_support_resistance(gold_etf["data"])
+            atr = calculate_atr(gold_etf["data"], 14)
+
+            z1, z2, z3 = st.columns(3)
+
+            z1.metric(
+                "Support",
+                format_price(support),
+            )
+
+            z2.metric(
+                "Resistance",
+                format_price(resistance),
+            )
+
+            if atr is not None and gold_etf_price is not None:
+                weak_zone = gold_etf_price - 1.5 * atr
+                strong_zone = gold_etf_price - 3 * atr
+
+                z3.metric(
+                    "Approx. Weak Buy Zone",
+                    format_price(weak_zone),
+                )
+
+                st.caption(
+                    f"Stronger buy zone around {format_price(strong_zone)} "
+                    "(more volatile, use discretion)."
+                )
+        else:
+            st.info("ETF data not available for zone calculation.")
+
+        st.caption(
+            "This is a rule-based, technical + macro summary. It is not "
+            "investment advice and does not guarantee future returns."
+        )
+
+    # -------------------------
+    # SILVER TAB
+    # -------------------------
+    with silver_tab:
+        st.markdown("### Silver (Nippon Silver ETF + Global Benchmarks)")
+
+        silver_etf = metals.get("silver_etf", {})
+        silver_futures = metals.get("silver_futures", {})
+        usd_index = metals.get("usd_index", {})
+
+        silver_etf_price = silver_etf.get("latest_price")
+        silver_futures_price = silver_futures.get("latest_price")
+
+        s1, s2 = st.columns(2)
+
+        s1.metric(
+            "Nippon Silver ETF (SILVERBEES.NS)",
+            format_price(silver_etf_price) if silver_etf_price else "Not available",
+        )
+
+        s2.metric(
+            "COMEX Silver Futures (SI=F)",
+            f"${silver_futures_price:,.2f}" if silver_futures_price else "Not available",
+        )
+
+        silver_outlook = calculate_metals_outlook(
+            etf_data=silver_etf,
+            futures_data=silver_futures,
+            usd_data=usd_index,
+            metal_type="silver",
+        )
+
+        st.divider()
+
+        o1, o2 = st.columns(2)
+
+        o1.metric(
+            "Outlook (1–3 Months)",
+            silver_outlook["outlook"],
+        )
+
+        o2.metric(
+            "Suggested Stance",
+            silver_outlook["stance"],
+        )
+
+        if silver_outlook["reasons"]:
+            st.markdown("### Key Drivers")
+            for reason in silver_outlook["reasons"]:
+                st.write(f"- {reason}")
+
+        st.divider()
+
+        st.markdown("### Buying Zones (Guidance Only)")
+
+        if silver_etf.get("data") is not None and not silver_etf["data"].empty:
+            support, resistance = calculate_support_resistance(silver_etf["data"])
+            atr = calculate_atr(silver_etf["data"], 14)
+
+            z1, z2, z3 = st.columns(3)
+
+            z1.metric(
+                "Support",
+                format_price(support),
+            )
+
+            z2.metric(
+                "Resistance",
+                format_price(resistance),
+            )
+
+            if atr is not None and silver_etf_price is not None:
+                weak_zone = silver_etf_price - 1.5 * atr
+                strong_zone = silver_etf_price - 3 * atr
+
+                z3.metric(
+                    "Approx. Weak Buy Zone",
+                    format_price(weak_zone),
+                )
+
+                st.caption(
+                    f"Stronger buy zone around {format_price(strong_zone)} "
+                    "(more volatile, use discretion)."
+                )
+        else:
+            st.info("ETF data not available for zone calculation.")
+
+        st.caption(
+            "This is a rule-based, technical + macro summary. It is not "
+            "investment advice and does not guarantee future returns."
+        )
+
+    
     # =========================================================================
     # HISTORICAL TAB — PENDING-ENTRY SUPPORT
     # =========================================================================

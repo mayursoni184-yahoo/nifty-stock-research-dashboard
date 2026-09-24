@@ -4862,17 +4862,14 @@ with st.sidebar:
 # =============================================================================
 
 if dashboard_mode == "Daily Market Command Center":
-    # ... (your existing Daily Market Command Center code unchanged)
     st.subheader("Daily Market Command Center")
     st.info("Daily Market Command Center content goes here (unchanged from your current app).")
 
 elif dashboard_mode == "Stock Research":
-    # ... (your existing Stock Research code unchanged, including Position & Outlook tab if you added it)
     st.subheader("Stock Research")
     st.info("Stock Research content goes here (unchanged from your current app).")
 
 elif dashboard_mode == "Winner Ranking Scanner":
-    # ... (your existing Winner Ranking Scanner code unchanged)
     st.subheader("Winner Ranking Scanner")
     st.info("Winner Ranking Scanner content goes here (unchanged from your current app).")
 
@@ -4886,6 +4883,9 @@ elif dashboard_mode == "Historical Filter Study":
         ]
     )
 
+    # =========================
+    # HISTORICAL 5-YEAR STUDY
+    # =========================
     with historical_tab:
         st.markdown(
             """
@@ -4902,6 +4902,20 @@ elif dashboard_mode == "Historical Filter Study":
             """
         )
 
+        historical_scan_limit = st.selectbox(
+            "Stocks to evaluate",
+            [
+                20,
+                50,
+                100,
+                250,
+                500,
+                750,
+            ],
+            index=1,
+            key="historical_scan_limit",
+        )
+
         st.info(
             "Every qualifying day is retained. If a stock passes on "
             "three consecutive trading days, all three dates appear as "
@@ -4909,8 +4923,242 @@ elif dashboard_mode == "Historical Filter Study":
             "Pending Next Trading Day with NA entry price."
         )
 
-        # ... (rest of your existing Historical 5-Year Study code unchanged)
+        if st.button(
+            "▶ Run Historical 5-Year Study",
+            type="primary",
+        ):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
 
+            def historical_progress(
+                position,
+                total,
+                symbol,
+            ):
+                progress_bar.progress(
+                    position / total
+                )
+
+                progress_text.caption(
+                    f"Evaluating {position:,} of {total:,}: {symbol}"
+                )
+
+            results = run_optimized_historical_filter_study(
+                stock_universe,
+                minimum_market_cap,
+                historical_scan_limit,
+                historical_progress,
+            )
+
+            progress_bar.empty()
+            progress_text.empty()
+
+            st.session_state[
+                "historical_filter_results"
+            ] = results
+
+            st.session_state[
+                "historical_filter_settings"
+            ] = {
+                "minimum_market_cap": minimum_market_cap,
+                "scan_limit": historical_scan_limit,
+            }
+
+        historical_results = st.session_state[
+            "historical_filter_results"
+        ]
+
+        if historical_results is None or historical_results.empty:
+            st.info(
+                "Click Run Historical 5-Year Study to generate results."
+            )
+
+        else:
+            summary = calculate_historical_study_summary(
+                historical_results
+            )
+
+            settings = st.session_state[
+                "historical_filter_settings"
+            ]
+
+            st.markdown(
+                f"""
+                <div class="research-card blue-card">
+                    <h3>Historical Study Configuration</h3>
+                    <p>
+                        Current Market Cap Eligibility:
+                        Above ₹{settings.get("minimum_market_cap", 3000):,.0f} Cr |
+                        Stocks Evaluated:
+                        {settings.get("scan_limit", 50)} |
+                        Signal Counting: Every qualifying day |
+                        Signal Gap: 0 trading days
+                    </p>
+                    <p>
+                        Entry: Next available trading-day adjusted close |
+                        Historical Debt/Equity, EPS and ROE: Not evaluated
+                    </p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            h1, h2, h3, h4, h5, h6 = st.columns(6)
+
+            h1.metric(
+                "Total Signal Records",
+                summary["total_signal_records"],
+            )
+
+            h2.metric(
+                "Unique Stocks",
+                summary["unique_stocks"],
+            )
+
+            h3.metric(
+                "Unique Stock-Months",
+                summary["unique_stock_months"],
+            )
+
+            h4.metric(
+                "Unique Stock-Quarters",
+                summary["unique_stock_quarters"],
+            )
+
+            h5.metric(
+                "Consecutive Signal Records",
+                summary["consecutive_signal_records"],
+            )
+
+            h6.metric(
+                "Pending Entries",
+                summary["pending_entries"],
+            )
+
+            st.subheader(
+                "Forward Outcome Summary"
+            )
+
+            st.dataframe(
+                summary["horizon_summary"],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Average Max Return %": st.column_config.NumberColumn(
+                        "Average Max Return",
+                        format="%.2f%%",
+                    ),
+                    "Median Max Return %": st.column_config.NumberColumn(
+                        "Median Max Return",
+                        format="%.2f%%",
+                    ),
+                    "Average Min Return %": st.column_config.NumberColumn(
+                        "Average Min Return",
+                        format="%.2f%%",
+                    ),
+                    "Median Min Return %": st.column_config.NumberColumn(
+                        "Median Min Return",
+                        format="%.2f%%",
+                    ),
+                    "10% Hit Rate %": st.column_config.NumberColumn(
+                        "10% Hit Rate",
+                        format="%.2f%%",
+                    ),
+                },
+            )
+
+            st.subheader(
+                "Historical Signals by Year"
+            )
+
+            if not summary["year_summary"].empty:
+                st.dataframe(
+                    summary["year_summary"],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+            st.subheader(
+                "Individual Historical Signal Records"
+            )
+
+            historical_display_columns = [
+                "stock_symbol",
+                "stock_name",
+                "signal_date",
+                "signal_day_price",
+                "entry_date",
+                "entry_price",
+                "entry_status",
+                "entry_price_status",
+                "daily_candle_return_pct",
+                "volume_ratio_vs_5d_sma",
+                "daily_rsi_14",
+                "weekly_rsi_14",
+                "atr_14_pct_of_close",
+                "max_ret_5d",
+                "hit_10pct_5d",
+                "max_ret_10d",
+                "hit_10pct_10d",
+                "max_ret_20d",
+                "hit_10pct_20d",
+                "max_ret_30d",
+                "min_ret_30d",
+                "hit_10pct_30d",
+                "max_ret_60d",
+                "min_ret_60d",
+                "hit_10pct_60d",
+                "max_ret_90d",
+                "min_ret_90d",
+                "hit_10pct_90d",
+                "max_ret_6m",
+                "min_ret_6m",
+                "hit_10pct_6m",
+                "max_ret_9m",
+                "hit_10pct_9m",
+                "max_ret_12m",
+                "min_ret_12m",
+                "hit_10pct_12m",
+            ]
+
+            st.dataframe(
+                historical_results[
+                    historical_display_columns
+                ],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "signal_date": st.column_config.DateColumn(
+                        "Signal Date"
+                    ),
+                    "entry_date": st.column_config.DateColumn(
+                        "Entry Date"
+                    ),
+                    "signal_day_price": st.column_config.NumberColumn(
+                        "Signal-Day Price",
+                        format="₹%.2f",
+                    ),
+                    "entry_price": st.column_config.NumberColumn(
+                        "Entry Price",
+                        format="₹%.2f",
+                    ),
+                },
+            )
+
+            historical_csv = historical_results.to_csv(
+                index=False
+            ).encode("utf-8")
+
+            st.download_button(
+                "⬇️ Download Historical Study CSV",
+                data=historical_csv,
+                file_name="nifty_historical_filter_study.csv",
+                mime="text/csv",
+            )
+
+    # =========================
+    # LIVE / TODAY FILTER SCAN
+    # =========================
     with live_tab:
         st.markdown(
             """
@@ -4958,7 +5206,364 @@ elif dashboard_mode == "Historical Filter Study":
             unsafe_allow_html=True,
         )
 
-        # ... (rest of your existing Live / Today Filter Scan code unchanged)
+        live_col1, live_col2 = st.columns(2)
+
+        with live_col1:
+            live_scan_limit = st.selectbox(
+                "Stocks to evaluate for Live Scan",
+                [
+                    20,
+                    50,
+                    100,
+                    250,
+                    500,
+                    750,
+                ],
+                index=1,
+                key="live_scan_limit",
+            )
+
+        with live_col2:
+            auto_info = (
+                "Manual refresh is recommended. "
+                "Yahoo Finance intraday data is cached for 60 seconds."
+            )
+
+            st.info(auto_info)
+
+        st.warning(
+            "Intraday Yahoo Finance data can be delayed, incomplete, "
+            "or unavailable for some NSE stocks. If intraday data cannot "
+            "be fetched, the scan falls back to the latest daily data and "
+            "labels the result clearly."
+        )
+
+        if st.button(
+            "⚡ Run / Refresh Live Filter Scan",
+            type="primary",
+        ):
+            progress_bar = st.progress(0)
+            progress_text = st.empty()
+
+            def live_progress(
+                position,
+                total,
+                symbol,
+            ):
+                progress_bar.progress(
+                    position / total
+                )
+
+                progress_text.caption(
+                    f"Checking {position:,} of {total:,}: {symbol}"
+                )
+
+            live_results = run_live_filter_scan(
+                universe=stock_universe,
+                minimum_market_cap=minimum_market_cap,
+                scan_limit=live_scan_limit,
+                market_open=market_status["is_open"],
+                progress_callback=live_progress,
+            )
+
+            progress_bar.empty()
+            progress_text.empty()
+
+            st.session_state[
+                "live_filter_results"
+            ] = live_results
+
+            st.session_state[
+                "live_filter_metadata"
+            ] = {
+                "market_status": market_status["status"],
+                "scan_timestamp": market_status["now"],
+                "scan_limit": live_scan_limit,
+                "market_open": market_status["is_open"],
+            }
+
+        live_results = st.session_state[
+            "live_filter_results"
+        ]
+
+        live_metadata = st.session_state[
+            "live_filter_metadata"
+        ]
+
+        if live_results is None or live_results.empty:
+            st.info(
+                "Click Run / Refresh Live Filter Scan to find "
+                "current stocks passing the technical filter."
+            )
+
+        else:
+            passed_results = live_results[
+                live_results["all_filters_pass"]
+            ].copy()
+
+            total_checked = len(live_results)
+            total_passed = len(passed_results)
+
+            latest_scan_time = live_metadata.get(
+                "scan_timestamp"
+            )
+
+            live_summary_col1, live_summary_col2, live_summary_col3, live_summary_col4 = (
+                st.columns(4)
+            )
+
+            live_summary_col1.metric(
+                "Stocks Checked",
+                total_checked,
+            )
+
+            live_summary_col2.metric(
+                "Stocks Passing All Filters",
+                total_passed,
+            )
+
+            live_summary_col3.metric(
+                "Market Status",
+                live_metadata.get(
+                    "market_status",
+                    "Unknown",
+                ),
+            )
+
+            live_summary_col4.metric(
+                "Scan Time IST",
+                (
+                    latest_scan_time.strftime(
+                        "%H:%M:%S"
+                    )
+                    if latest_scan_time is not None
+                    else "Not available"
+                ),
+            )
+
+            if market_status["is_open"]:
+                st.warning(
+                    "Passing stocks are provisional intraday signals. "
+                    "Re-run or verify after market close before treating "
+                    "them as completed daily signals."
+                )
+            else:
+                st.success(
+                    "The scan is using latest daily end-of-day values."
+                )
+
+            st.subheader(
+                "Stocks Passing All Live / Today Filter Conditions"
+            )
+
+            if passed_results.empty:
+                st.info(
+                    "No stocks currently pass every required technical condition."
+                )
+            else:
+                live_display_columns = [
+                    "stock_symbol",
+                    "stock_name",
+                    "industry",
+                    "market_status",
+                    "data_mode",
+                    "signal_status",
+                    "data_source",
+                    "signal_timestamp_ist",
+                    "latest_price",
+                    "today_open",
+                    "today_high",
+                    "today_low",
+                    "current_day_change_pct",
+                    "current_volume",
+                    "prior_5d_average_volume",
+                    "volume_ratio_vs_prior_5d",
+                    "daily_sma_20",
+                    "daily_sma_200",
+                    "weekly_close_or_live_price",
+                    "weekly_sma_20",
+                    "atr_14_pct",
+                    "daily_rsi_14",
+                    "weekly_rsi_14",
+                    "current_debt_equity_reference",
+                    "current_eps_reference",
+                    "current_roe_reference",
+                ]
+
+                st.dataframe(
+                    passed_results[
+                        live_display_columns
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "signal_timestamp_ist": st.column_config.DatetimeColumn(
+                            "Latest Data Timestamp",
+                            format="YYYY-MM-DD HH:mm:ss",
+                        ),
+                        "latest_price": st.column_config.NumberColumn(
+                            "Latest Price",
+                            format="₹%.2f",
+                        ),
+                        "today_open": st.column_config.NumberColumn(
+                            "Today Open",
+                            format="₹%.2f",
+                        ),
+                        "today_high": st.column_config.NumberColumn(
+                            "Today High",
+                            format="₹%.2f",
+                        ),
+                        "today_low": st.column_config.NumberColumn(
+                            "Today Low",
+                            format="₹%.2f",
+                        ),
+                        "current_day_change_pct": st.column_config.NumberColumn(
+                            "Day Change %",
+                            format="%.2f%%",
+                        ),
+                        "current_volume": st.column_config.NumberColumn(
+                            "Current Volume",
+                            format="%.0f",
+                        ),
+                        "prior_5d_average_volume": st.column_config.NumberColumn(
+                            "Prior 5D Avg Volume",
+                            format="%.0f",
+                        ),
+                        "volume_ratio_vs_prior_5d": st.column_config.NumberColumn(
+                            "Volume / Prior 5D",
+                            format="%.2fx",
+                        ),
+                        "daily_sma_20": st.column_config.NumberColumn(
+                            "Daily SMA20",
+                            format="₹%.2f",
+                        ),
+                        "daily_sma_200": st.column_config.NumberColumn(
+                            "Daily SMA200",
+                            format="₹%.2f",
+                        ),
+                        "weekly_close_or_live_price": st.column_config.NumberColumn(
+                            "Weekly Close / Live Price",
+                            format="₹%.2f",
+                        ),
+                        "weekly_sma_20": st.column_config.NumberColumn(
+                            "Weekly SMA20",
+                            format="₹%.2f",
+                        ),
+                        "atr_14_pct": st.column_config.NumberColumn(
+                            "ATR %",
+                            format="%.2f%%",
+                        ),
+                        "daily_rsi_14": st.column_config.NumberColumn(
+                            "Daily RSI14",
+                            format="%.2f",
+                        ),
+                        "weekly_rsi_14": st.column_config.NumberColumn(
+                            "Weekly RSI14",
+                            format="%.2f",
+                        ),
+                        "current_roe_reference": st.column_config.NumberColumn(
+                            "Current ROE",
+                            format="%.2f",
+                        ),
+                    },
+                )
+
+                live_csv = passed_results.to_csv(
+                    index=False
+                ).encode("utf-8")
+
+                st.download_button(
+                    "⬇️ Download Passing Live Filter Stocks CSV",
+                    data=live_csv,
+                    file_name="nifty_live_today_filter_scan.csv",
+                    mime="text/csv",
+                )
+
+                passing_symbols = passed_results[
+                    "stock_symbol"
+                ].tolist()
+
+                selected_live_symbol = st.selectbox(
+                    "Open Stock Research",
+                    passing_symbols,
+                    key="live_open_stock_symbol",
+                )
+
+                if st.button(
+                    "Open Selected Stock Research",
+                    key="live_open_stock_button",
+                ):
+                    open_stock_research(
+                        selected_live_symbol
+                    )
+                    st.rerun()
+
+            st.divider()
+
+            st.subheader(
+                "Live Filter Audit — All Evaluated Stocks"
+            )
+
+            st.caption(
+                "Use this table to understand why a stock did not pass."
+            )
+
+            audit_columns = [
+                "stock_symbol",
+                "stock_name",
+                "data_mode",
+                "latest_price",
+                "current_day_change_pct",
+                "volume_ratio_vs_prior_5d",
+                "daily_rsi_14",
+                "weekly_rsi_14",
+                "atr_14_pct",
+                "volume_condition",
+                "candle_change_condition",
+                "close_above_sma20",
+                "close_above_sma200",
+                "weekly_above_sma20",
+                "atr_condition",
+                "daily_rsi_condition",
+                "weekly_rsi_condition",
+                "close_above_1d",
+                "close_above_2d",
+                "all_filters_pass",
+            ]
+
+            st.dataframe(
+                live_results[
+                    audit_columns
+                ],
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "latest_price": st.column_config.NumberColumn(
+                        "Latest Price",
+                        format="₹%.2f",
+                    ),
+                    "current_day_change_pct": st.column_config.NumberColumn(
+                        "Day Change %",
+                        format="%.2f%%",
+                    ),
+                    "volume_ratio_vs_prior_5d": st.column_config.NumberColumn(
+                        "Volume / Prior 5D",
+                        format="%.2fx",
+                    ),
+                    "daily_rsi_14": st.column_config.NumberColumn(
+                        "Daily RSI",
+                        format="%.2f",
+                    ),
+                    "weekly_rsi_14": st.column_config.NumberColumn(
+                        "Weekly RSI",
+                        format="%.2f",
+                    ),
+                    "atr_14_pct": st.column_config.NumberColumn(
+                        "ATR %",
+                        format="%.2f%%",
+                    ),
+                },
+            )
 
 elif dashboard_mode == "Gold & Silver Decision Hub":
     st.subheader("Gold & Silver Decision Hub")

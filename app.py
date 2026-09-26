@@ -1668,10 +1668,13 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
     market_cap_crore = safe_number(fundamentals.get("marketCap"), 0) / 10000000
     if market_cap_crore < minimum_market_cap:
         return None
+
     live_source = "Daily End-of-Day"
     live_timestamp = None
     signal_status = "Confirmed EOD"
     data_mode = "End-of-Day Confirmed"
+
+    # MARKET OPEN: use intraday current price / volume.
     if market_open:
         intraday_data = fetch_intraday_data(ticker)
         if not intraday_data.empty:
@@ -1696,6 +1699,7 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
             else:
                 completed_data = daily_data.copy()
         else:
+            # Fallback to daily data if intraday unavailable.
             completed_data = daily_data.copy()
             latest_price = float(daily_data["close"].iloc[-1])
             today_open = float(daily_data["open"].iloc[-1])
@@ -1706,16 +1710,22 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
             live_source = "Fallback: Latest Daily Data"
             signal_status = "Fallback Daily Data"
             data_mode = "Daily Fallback - Intraday Unavailable"
+
+    # MARKET CLOSED: use daily final/latest values.
     else:
-        completed_data = daily_data.iloc[:-1].copy()
+        # Use all available daily bars; the last bar is the latest completed day.
+        completed_data = daily_data.copy()
+
         latest_price = float(daily_data["close"].iloc[-1])
         today_open = float(daily_data["open"].iloc[-1])
         today_high = float(daily_data["high"].iloc[-1])
         today_low = float(daily_data["low"].iloc[-1])
         today_volume = float(daily_data["volume"].iloc[-1])
         live_timestamp = daily_data.index[-1]
+
     if len(completed_data) < 220:
         return None
+
     prior_5d_average_volume = float(completed_data["volume"].tail(5).mean())
     daily_sma_20 = float(completed_data["close"].tail(20).mean())
     daily_sma_200 = float(completed_data["close"].tail(200).mean())
@@ -1729,6 +1739,7 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
     )
     current_day_change_pct = ((latest_price / today_open - 1) * 100) if today_open != 0 else None
     volume_ratio = (today_volume / prior_5d_average_volume) if prior_5d_average_volume != 0 else None
+
     volume_condition = volume_ratio is not None and volume_ratio > 1.5
     candle_condition = current_day_change_pct is not None and current_day_change_pct > 2
     sma20_condition = latest_price > daily_sma_20
@@ -1747,6 +1758,7 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
     weekly_rsi_condition = provisional_weekly_rsi is not None and provisional_weekly_rsi >= 55
     close_1d_condition = latest_price > previous_day_close
     close_2d_condition = latest_price > two_day_ago_close
+
     all_filters_pass = (
         volume_condition
         and candle_condition
@@ -1759,6 +1771,7 @@ def calculate_live_filter_for_stock(record, minimum_market_cap, market_open):
         and close_1d_condition
         and close_2d_condition
     )
+
     return {
         "stock_symbol": record["Symbol"],
         "stock_name": record["Company Name"],

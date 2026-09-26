@@ -1428,6 +1428,7 @@ def create_historical_filter_records(symbol, company_name, prepared_data):
     signal_indexes = all_data.index.get_indexer(signal_data.index)
     entry_indexes = signal_indexes + 1
     valid_entry_mask = entry_indexes < len(all_data)
+
     results = pd.DataFrame({
         "stock_symbol": symbol,
         "stock_name": company_name,
@@ -1446,7 +1447,7 @@ def create_historical_filter_records(symbol, company_name, prepared_data):
             for valid in valid_entry_mask
         ],
         "entry_price_status": [
-            "Available" if valid else "Not Available Yet"
+            "Available" if valid else "Awaiting Next Trading Day"
             for valid in valid_entry_mask
         ],
         "daily_candle_return_pct": signal_data["daily_candle_return_pct"].to_numpy(),
@@ -1458,6 +1459,7 @@ def create_historical_filter_records(symbol, company_name, prepared_data):
         "historical_eps": "Not evaluated",
         "historical_roe": "Not evaluated",
     })
+
     completed_entry_indexes = entry_indexes[valid_entry_mask]
     for horizon_name, horizon_days in RETURN_WINDOWS.items():
         include_minimum = horizon_name in ["30d", "60d", "90d", "6m", "12m"]
